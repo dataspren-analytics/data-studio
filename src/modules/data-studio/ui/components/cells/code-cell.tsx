@@ -21,6 +21,7 @@ import { cellTypeConfig, editorTheme, editorThemeDarkOverride, type SelectableCe
 import {
   extractAssertResults,
   extractTableData,
+  getCellType,
   getSourceString,
   type AssertResult,
   type AssertTest,
@@ -129,7 +130,7 @@ export function CodeCell({
     setActiveTab(tab);
     onUpdateMetadata?.({ activeTab: tab });
   }, [onUpdateMetadata]);
-  const isSQL = (cell.metadata.dataspren_type || "python") === "sql";
+  const isSQL = getCellType(cell.source) === "sql";
   const assertConfig = cell.metadata.assertConfig || { tests: [] };
 
   const assertResults = useMemo(() => {
@@ -156,7 +157,7 @@ export function CodeCell({
 
   const hasOutput = cell.outputs.length > 0 || isQueued || isRunning;
   const showOutputArea = hasOutput || (isSQL && hasTests);
-  const cellType = cell.metadata.dataspren_type || "python";
+  const cellType = getCellType(cell.source);
   const typeConfig = cellTypeConfig[cellType as SelectableCellType] ?? cellTypeConfig.python;
 
   const handleRunCell = useCallback(

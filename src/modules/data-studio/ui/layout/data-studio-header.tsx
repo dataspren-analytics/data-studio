@@ -5,11 +5,7 @@ import { ExternalLink, Loader2, Moon, RotateCcw, Sun } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { useRuntime } from "../provider";
 
-interface DataStudioHeaderProps {
-  onCreateDemoNotebook?: () => void;
-}
-
-export function DataStudioHeader({ onCreateDemoNotebook }: DataStudioHeaderProps) {
+export function DataStudioHeader() {
   const runtime = useRuntime();
   const [isDark, setIsDark] = useState(true);
 
@@ -51,20 +47,6 @@ export function DataStudioHeader({ onCreateDemoNotebook }: DataStudioHeaderProps
             draggable={false}
           />
         </a>
-        <div className="h-5 w-px bg-neutral-200 dark:bg-border" />
-        {onCreateDemoNotebook && (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                onClick={onCreateDemoNotebook}
-                className="px-2.5 py-1.5 text-xs font-medium text-cyan-700 bg-cyan-50 hover:bg-cyan-100 border border-cyan-200 dark:text-cyan-300 dark:bg-cyan-950 dark:hover:bg-cyan-900 dark:border-cyan-800 rounded-md transition-colors"
-              >
-                Get Demo Notebook
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="bottom">Create a demo notebook with sample data</TooltipContent>
-          </Tooltip>
-        )}
       </div>
 
       <div className="flex items-center gap-1">

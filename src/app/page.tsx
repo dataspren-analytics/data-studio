@@ -16,7 +16,7 @@ function createEmptyCell(): CodeCellType {
     source: "",
     outputs: [],
     execution_count: null,
-    metadata: { dataspren_type: "python" },
+    metadata: {},
   };
 }
 

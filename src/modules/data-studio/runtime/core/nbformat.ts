@@ -76,8 +76,8 @@ export type CellOutput = ExecuteResultOutput | DisplayDataOutput | StreamOutput 
 // DataSpren Extensions (stored in cell metadata)
 // ============================================================================
 
-/** DataSpren-specific cell types (stored in metadata.dataspren_type) */
-export type DataSprenCellType = "python" | "sql" | "assert";
+/** DataSpren cell types — derived from source content (python default, sql when source starts with %sql) */
+export type DataSprenCellType = "python" | "sql";
 
 export type AssertTestType = "unique" | "not_null" | "accepted_values" | "custom_sql";
 
@@ -114,7 +114,6 @@ export interface VisualizeConfig {
 }
 
 export interface CellMetadata {
-  dataspren_type?: DataSprenCellType;
   viewName?: string;
   assertConfig?: { tests: AssertTest[] };
   visualizeConfig?: VisualizeConfig;
@@ -205,6 +204,25 @@ export function isMarkdownCell(cell: NotebookCell): cell is MarkdownCell {
 
 export function isRawCell(cell: NotebookCell): cell is RawCell {
   return cell.cell_type === "raw";
+}
+
+// ============================================================================
+// Cell Type Detection (derived from source content)
+// ============================================================================
+
+/** Determine cell type from source: "sql" if first line is %sql, otherwise "python" */
+export function getCellType(source: MultilineString): DataSprenCellType {
+  const str = getSourceString(source);
+  return str.trimStart().startsWith("%sql") ? "sql" : "python";
+}
+
+/** Strip the %sql magic line from source, returning the executable content */
+export function getExecutableSource(source: MultilineString): string {
+  const str = getSourceString(source);
+  if (str.trimStart().startsWith("%sql")) {
+    return str.replace(/^\s*%sql[^\n]*\n?/, "");
+  }
+  return str;
 }
 
 // ============================================================================
@@ -385,12 +403,15 @@ export function createCodeCell(
   source: string = "",
   datasprenType: DataSprenCellType = "python",
 ): CodeCell {
+  const finalSource = datasprenType === "sql" && !source.trimStart().startsWith("%sql")
+    ? (source ? `%sql\n${source}` : "%sql\n")
+    : source;
   return {
     id: Math.random().toString(36).substring(2, 9),
     cell_type: "code",
-    source,
+    source: finalSource,
     outputs: [],
     execution_count: null,
-    metadata: { dataspren_type: datasprenType },
+    metadata: {},
   };
 }

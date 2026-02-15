@@ -96,6 +96,9 @@ export {
   // String utilities
   getMultilineString,
   getSourceString,
+  // Cell type detection
+  getCellType,
+  getExecutableSource,
   // Output extraction
   extractAssertResults,
   extractImageData,

@@ -11,6 +11,8 @@ import {
   type ReactNode,
 } from "react";
 import {
+  getCellType,
+  getExecutableSource,
   getSourceString,
   isCodeCell,
   createAssertOutput,
@@ -39,11 +41,10 @@ function createCell(datasprenType: DataSprenCellType, viewNumber?: number): Code
   return {
     id: generateId(),
     cell_type: "code",
-    source: "",
+    source: datasprenType === "sql" ? "%sql\n" : "",
     outputs: [],
     execution_count: null,
     metadata: {
-      dataspren_type: datasprenType,
       viewName: datasprenType === "sql" ? `t${viewNumber ?? 1}` : undefined,
     },
   };
@@ -130,7 +131,15 @@ export function CellProvider({ children }: { children: ReactNode }) {
     (id: string) => {
       const filtered = cells.filter((c) => c.id !== id);
       if (filtered.length === 0) {
-        updateCells([createCell("python")]);
+        const emptyCell: CodeCell = {
+          id: generateId(),
+          cell_type: "code",
+          source: "",
+          outputs: [],
+          execution_count: null,
+          metadata: {},
+        };
+        updateCells([emptyCell]);
       } else {
         updateCells(filtered);
       }
@@ -147,20 +156,29 @@ export function CellProvider({ children }: { children: ReactNode }) {
             return {
               id: c.id,
               cell_type: "markdown",
-              source: c.source,
+              source: getExecutableSource(c.source),
               metadata: {},
             } satisfies MarkdownCell;
+          }
+          const currentSource = getSourceString(c.source);
+          const currentType = getCellType(c.source);
+          let newSource: string;
+          if (datasprenType === "sql" && currentType !== "sql") {
+            newSource = `%sql\n${currentSource}`;
+          } else if (datasprenType === "python" && currentType === "sql") {
+            newSource = getExecutableSource(c.source);
+          } else {
+            newSource = currentSource;
           }
           const needsViewName = datasprenType === "sql" && !c.metadata.viewName;
           return {
             id: c.id,
             cell_type: "code",
-            source: c.source,
+            source: newSource,
             outputs: [],
             execution_count: null,
             metadata: {
               ...c.metadata,
-              dataspren_type: datasprenType,
               viewName: needsViewName ? `t${nextViewNumberRef.current++}` : c.metadata.viewName,
             },
           };
@@ -298,7 +316,7 @@ export function CellProvider({ children }: { children: ReactNode }) {
       await new Promise((resolve) => setTimeout(resolve, 50));
 
       const outputs: CellOutput[] = [];
-      const cellType = cell.metadata.dataspren_type;
+      const cellType = getCellType(cell.source);
 
       const startTime = Date.now();
 
@@ -324,7 +342,7 @@ export function CellProvider({ children }: { children: ReactNode }) {
         runtime.refreshFunctions();
         runtime.refreshVariables();
       } else if (cellType === "sql") {
-        const queryToRun = queryOverride || getSourceString(cell.source);
+        const queryToRun = queryOverride || getExecutableSource(cell.source);
         const result = await runtime.runSQL(
           queryToRun,
           queryOverride ? undefined : cell.metadata.viewName,
@@ -354,9 +372,6 @@ export function CellProvider({ children }: { children: ReactNode }) {
           const assertResults = await executeAssertTests(embeddedTests);
           outputs.push(createAssertOutput(assertResults));
         }
-      } else if (cellType === "assert") {
-        const assertResults = await executeAssertTests(cell.metadata.assertConfig?.tests || []);
-        outputs.push(createAssertOutput(assertResults));
       }
 
       updateCells(cellsWithCleared.map((c) => (c.id === id ? { ...c, outputs } : c)));

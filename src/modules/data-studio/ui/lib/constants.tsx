@@ -1,6 +1,6 @@
 import { EditorView } from "@codemirror/view";
 import { Database, TextCursorInput } from "lucide-react";
-import type { AssertTestType, CodeCell, DataSprenCellType } from "../../runtime";
+import type { AssertTestType, CodeCell } from "../../runtime";
 import { generateId } from "./utils";
 
 export const editorTheme = EditorView.theme({
@@ -70,7 +70,7 @@ const PythonIcon = () => (
   </svg>
 );
 
-export type SelectableCellType = Exclude<DataSprenCellType, "assert"> | "markdown";
+export type SelectableCellType = "python" | "sql" | "markdown";
 
 export const cellTypeConfig: Record<
   SelectableCellType,
@@ -123,24 +123,25 @@ export const initialCells: CodeCell[] = [
     ],
     outputs: [],
     execution_count: null,
-    metadata: { dataspren_type: "python" },
+    metadata: {},
   },
   {
     id: generateId(),
     cell_type: "code",
-    source: ['select * from "eto-map-of-science.csv" limit 3'],
+    source: ["%sql\n", 'select * from "eto-map-of-science.csv" limit 3'],
     outputs: [],
     execution_count: null,
-    metadata: { dataspren_type: "sql", viewName: "t1" },
+    metadata: { viewName: "t1" },
   },
   {
     id: generateId(),
     cell_type: "code",
     source: [
+      "%sql\n",
       'select count(*) as count, my_rounder(sum("Cluster size")/count(*)) as average from t1',
     ],
     outputs: [],
     execution_count: null,
-    metadata: { dataspren_type: "sql", viewName: "t2" },
+    metadata: { viewName: "t2" },
   },
 ];

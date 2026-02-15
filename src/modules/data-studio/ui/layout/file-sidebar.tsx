@@ -54,6 +54,7 @@ import {
   ChevronRight,
   Copy,
   Download,
+  Home,
   Loader2,
   Pencil,
   Plus,
@@ -82,6 +83,9 @@ type DropTargetDir = string | null;
 
 interface FileSidebarProps {
   onCreateNotebook?: (name?: string, cells?: NotebookCell[]) => Promise<void>;
+  showHome?: boolean;
+  onShowHome?: () => void;
+  onSelectFile?: (path: string | null) => void;
 }
 
 // ============================================================================
@@ -193,17 +197,22 @@ function FileIconForName({ name, size, className }: { name: string; size: number
   return <span className={className}>{icon}</span>;
 }
 
-export function FileSidebar({ onCreateNotebook: onCreateNotebookProp }: FileSidebarProps = {}) {
+export function FileSidebar({ onCreateNotebook: onCreateNotebookProp, showHome, onShowHome, onSelectFile: onSelectFileProp }: FileSidebarProps = {}) {
   const {
     notebooks,
     activeFilePath,
-    selectFile: onSelectFile,
-    openFile: onOpenFile,
+    selectFile,
+    openFile,
     createNotebook,
     renameNotebook: onRenameNotebook,
     exportNotebook: onExportNotebook,
     reloadNotebooks,
   } = useNotebook();
+  const onSelectFile = onSelectFileProp ?? selectFile;
+  const onOpenFile = useCallback(async (path: string) => {
+    await openFile(path);
+    onSelectFileProp?.(path);
+  }, [openFile, onSelectFileProp]);
   const runtime = useRuntime();
 
   const dataFiles = runtime.dataFiles;
@@ -858,13 +867,27 @@ base64.b64encode(content).decode('utf-8')
           <ChevronRight size={16} />
         </button>
         <div className="mt-4 flex flex-col gap-1">
+          {onShowHome && (
+            <button
+              onClick={onShowHome}
+              className={cn(
+                "p-1.5 rounded-md transition-colors",
+                showHome
+                  ? "bg-neutral-100 dark:bg-sidebar-accent text-neutral-950 dark:text-sidebar-foreground"
+                  : "text-neutral-400 dark:text-muted-foreground hover:text-neutral-950 dark:hover:text-sidebar-foreground hover:bg-neutral-50 dark:hover:bg-sidebar-accent",
+              )}
+              title="Home"
+            >
+              <Home size={14} />
+            </button>
+          )}
           {notebooks.slice(0, 5).map((notebook) => (
             <button
               key={notebook.filePath}
               onClick={() => onSelectFile(notebook.filePath)}
               className={cn(
                 "p-1.5 rounded-md transition-colors",
-                notebook.filePath === activeFilePath
+                !showHome && notebook.filePath === activeFilePath
                   ? "bg-neutral-100 dark:bg-sidebar-accent text-neutral-950 dark:text-sidebar-foreground"
                   : "text-neutral-400 dark:text-muted-foreground hover:text-neutral-950 dark:hover:text-sidebar-foreground hover:bg-neutral-50 dark:hover:bg-sidebar-accent",
               )}
@@ -892,6 +915,21 @@ base64.b64encode(content).decode('utf-8')
         onPointerDown={handleResizePointerDown}
         className={cn("absolute top-0 right-0 w-1 h-full cursor-col-resize z-10 transition-colors", isResizingActive ? "bg-blue-500/50" : "hover:bg-blue-500/50")}
       />
+      {/* Home button */}
+      {onShowHome && (
+        <button
+          onClick={onShowHome}
+          className={cn(
+            "flex items-center gap-2 px-3 py-2 text-xs transition-colors border-b border-neutral-200/50 dark:border-neutral-800/50",
+            showHome
+              ? "text-neutral-900 dark:text-neutral-100 bg-neutral-100 dark:bg-sidebar-accent"
+              : "text-neutral-500 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-100 hover:bg-neutral-50 dark:hover:bg-sidebar-accent/50",
+          )}
+        >
+          <Home size={14} />
+          <span className="font-medium">Home</span>
+        </button>
+      )}
       {/* Header */}
       <div className="flex items-center justify-between px-3 py-2.5 border-b border-neutral-200/50 dark:border-neutral-800/50">
         <span className="font-mono text-xs font-medium text-neutral-400 dark:text-neutral-500 uppercase tracking-wide">
@@ -951,7 +989,7 @@ base64.b64encode(content).decode('utf-8')
               onDeleteFile={onDeleteFile}
               onCopyPath={handleCopyPath}
               onOpenFile={onOpenFile}
-              activeNotebookPath={activeFilePath}
+              activeNotebookPath={showHome ? null : activeFilePath}
               onDuplicateFile={handleDuplicateFile}
               onDownloadFile={handleDownloadFile}
               onExportFile={handleExportFile}

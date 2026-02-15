@@ -10,7 +10,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import type { CodeCell, NotebookCell } from "../../runtime";
+import type { NotebookCell } from "../../runtime";
 import {
   getRelativePath,
   listNotebooks as listNotebooksUtil,
@@ -22,9 +22,7 @@ import { initialCells } from "../lib/constants";
 import type { NotebookContextValue, NotebookEntry } from "../lib/types";
 import { exportNotebook, generateId } from "../lib/utils";
 import { useRuntime, useExecutionBackend } from "./runtime-provider";
-import { createDemoCells, SAMPLE_CSV_DATA } from "../lib/demo-data";
 
-const FIRST_VISIT_KEY = "dataspren-first-visit-done";
 
 // ============================================================================
 // Helper Functions
@@ -148,12 +146,7 @@ export function NotebookProviderInternal({
       const notebookInfos = await listNotebooksUtil(execution);
 
       if (notebookInfos.length === 0) {
-        const defaultEntry = createNotebookEntry("Untitled", "", undefined, configInitialCells);
-        await writeNotebookUtil(execution, defaultEntry.filePath, defaultEntry.document);
-        setNotebooks([defaultEntry]);
-        if (!activeFilePath) {
-          setActiveFilePath(defaultEntry.filePath);
-        }
+        setNotebooks([]);
       } else {
         const entries: NotebookEntry[] = await Promise.all(
           notebookInfos.map(async (info: NotebookInfo) => {
@@ -195,27 +188,7 @@ export function NotebookProviderInternal({
         const notebookInfos = await listNotebooksUtil(execution);
 
         if (notebookInfos.length === 0) {
-          const isFirstVisit = !localStorage.getItem(FIRST_VISIT_KEY);
-
-          if (isFirstVisit) {
-            localStorage.setItem(FIRST_VISIT_KEY, "true");
-            const demoCells = createDemoCells();
-            const demoEntry = createNotebookEntry("Demo Notebook", "", demoCells);
-
-            const blob = new Blob([SAMPLE_CSV_DATA], { type: "text/csv" });
-            const arrayBuffer = await blob.arrayBuffer();
-            await execution.writeFile(getRelativePath("/mnt/local/sample_sales.csv"), new Uint8Array(arrayBuffer));
-            await runtime.refreshFiles();
-
-            await writeNotebookUtil(execution, demoEntry.filePath, demoEntry.document);
-            setNotebooks([demoEntry]);
-            setActiveFilePath(demoEntry.filePath);
-          } else {
-            const defaultEntry = createNotebookEntry("Untitled", "", undefined, configInitialCells);
-            await writeNotebookUtil(execution, defaultEntry.filePath, defaultEntry.document);
-            setNotebooks([defaultEntry]);
-            setActiveFilePath(defaultEntry.filePath);
-          }
+          setNotebooks([]);
         } else {
           const entries: NotebookEntry[] = await Promise.all(
             notebookInfos.map(async (info: NotebookInfo) => {
@@ -233,9 +206,7 @@ export function NotebookProviderInternal({
         }
       } catch (err) {
         console.error("Failed to load notebooks:", err);
-        const defaultEntry = createNotebookEntry("Untitled", "", undefined, configInitialCells);
-        setNotebooks([defaultEntry]);
-        setActiveFilePath(defaultEntry.filePath);
+        setNotebooks([]);
       }
       setIsLoaded(true);
     }
@@ -304,23 +275,9 @@ export function NotebookProviderInternal({
       }
 
       const remaining = notebooksRef.current.filter((n) => n.filePath !== filePath);
+      setNotebooks(remaining);
       if (remaining.length === 0) {
-        const emptyCell: CodeCell = {
-          id: generateId(),
-          cell_type: "code",
-          source: "",
-          outputs: [],
-          execution_count: null,
-          metadata: { dataspren_type: "python" },
-        };
-        const defaultEntry = createNotebookEntry("Untitled", "", [emptyCell]);
-        if (!ephemeral) {
-          await writeNotebookUtil(execution, defaultEntry.filePath, defaultEntry.document);
-        }
-        setNotebooks([defaultEntry]);
-        setActiveFilePath(defaultEntry.filePath);
-      } else {
-        setNotebooks(remaining);
+        setActiveFilePath(null);
       }
     },
     [ephemeral, execution],
