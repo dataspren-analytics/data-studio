@@ -52,6 +52,22 @@ export function RuntimeProvider({ execution, autoInit = true, children }: Runtim
     return unsub;
   }, [execution]);
 
+  // Cross-tab file change notifications via BroadcastChannel.
+  // When this tab mutates files, it broadcasts so other tabs can refresh.
+  // When another tab broadcasts, this tab refreshes its file list.
+  const fileChannelRef = useRef<BroadcastChannel | null>(null);
+  useEffect(() => {
+    const channel = new BroadcastChannel("data-studio-files");
+    fileChannelRef.current = channel;
+    channel.onmessage = () => {
+      execution.listFiles().then(setDataFiles);
+    };
+    return () => {
+      channel.close();
+      fileChannelRef.current = null;
+    };
+  }, [execution]);
+
   // Convert FileInfo to RegisteredFile for UI display
   const registeredFiles = useMemo<RegisteredFile[]>(() => {
     return dataFiles.map((dataFile) => {
@@ -127,6 +143,10 @@ export function RuntimeProvider({ execution, autoInit = true, children }: Runtim
   // File Operations
   // ============================================================================
 
+  const broadcastFileChange = useCallback(() => {
+    fileChannelRef.current?.postMessage("changed");
+  }, []);
+
   const handleWriteFile = useCallback(
     async (file: File, targetDir?: string): Promise<void> => {
       const arrayBuffer = await file.arrayBuffer();
@@ -134,8 +154,9 @@ export function RuntimeProvider({ execution, autoInit = true, children }: Runtim
       await execution.writeFile(getRelativePath(`${dir}/${file.name}`), new Uint8Array(arrayBuffer));
       const files = await execution.listFiles();
       setDataFiles(files);
+      broadcastFileChange();
     },
-    [execution],
+    [execution, broadcastFileChange],
   );
 
   const handleReadFile = useCallback(
@@ -153,10 +174,11 @@ export function RuntimeProvider({ execution, autoInit = true, children }: Runtim
       if (success) {
         const files = await execution.listFiles();
         setDataFiles(files);
+        broadcastFileChange();
       }
       return success;
     },
-    [execution],
+    [execution, broadcastFileChange],
   );
 
   const handleCreateDirectory = useCallback(
@@ -164,8 +186,9 @@ export function RuntimeProvider({ execution, autoInit = true, children }: Runtim
       await execution.createDirectory(path);
       const files = await execution.listFiles();
       setDataFiles(files);
+      broadcastFileChange();
     },
-    [execution],
+    [execution, broadcastFileChange],
   );
 
   const handleDeleteDirectory = useCallback(
@@ -174,10 +197,11 @@ export function RuntimeProvider({ execution, autoInit = true, children }: Runtim
       if (success) {
         const files = await execution.listFiles();
         setDataFiles(files);
+        broadcastFileChange();
       }
       return success;
     },
-    [execution],
+    [execution, broadcastFileChange],
   );
 
   const handleRenameDirectory = useCallback(
@@ -185,8 +209,9 @@ export function RuntimeProvider({ execution, autoInit = true, children }: Runtim
       await execution.renameDirectory(oldPath, newName);
       const files = await execution.listFiles();
       setDataFiles(files);
+      broadcastFileChange();
     },
-    [execution],
+    [execution, broadcastFileChange],
   );
 
   const handleMoveFile = useCallback(
@@ -194,8 +219,9 @@ export function RuntimeProvider({ execution, autoInit = true, children }: Runtim
       await execution.moveFile(sourcePath, targetDir);
       const files = await execution.listFiles();
       setDataFiles(files);
+      broadcastFileChange();
     },
-    [execution],
+    [execution, broadcastFileChange],
   );
 
   const handleRenameFile = useCallback(
@@ -203,8 +229,9 @@ export function RuntimeProvider({ execution, autoInit = true, children }: Runtim
       await execution.renameFile(path, newName);
       const files = await execution.listFiles();
       setDataFiles(files);
+      broadcastFileChange();
     },
-    [execution],
+    [execution, broadcastFileChange],
   );
 
   // ============================================================================

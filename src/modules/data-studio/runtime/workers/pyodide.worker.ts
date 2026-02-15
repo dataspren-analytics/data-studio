@@ -69,6 +69,40 @@ const STORAGE_MOUNT_PATH = "/mnt";
 const LOCAL_STORAGE_SUBPATH = "local";
 const S3_PUBLIC_BUCKET_SUBPATH = "public_bucket";
 
+// Idle handle suspension: close OPFS sync handles after inactivity so other
+// tabs can access the same OPFS files without NoModificationAllowedError.
+const HANDLE_IDLE_TIMEOUT_MS = 5000;
+let handleIdleTimer: ReturnType<typeof setTimeout> | null = null;
+
+/**
+ * Resume OPFS handles before code execution and cancel the idle timer.
+ */
+async function resumeHandlesIfNeeded(): Promise<void> {
+  if (handleIdleTimer !== null) {
+    clearTimeout(handleIdleTimer);
+    handleIdleTimer = null;
+  }
+  if (virtualFS) {
+    await virtualFS.resumeHandles();
+  }
+}
+
+/**
+ * Schedule handle suspension after a short idle period.
+ * Called after each execution completes.
+ */
+function scheduleHandleSuspend(): void {
+  if (handleIdleTimer !== null) {
+    clearTimeout(handleIdleTimer);
+  }
+  handleIdleTimer = setTimeout(async () => {
+    handleIdleTimer = null;
+    if (virtualFS) {
+      await virtualFS.suspendHandles();
+    }
+  }, HANDLE_IDLE_TIMEOUT_MS);
+}
+
 function postResponse(response: WorkerResponse) {
   self.postMessage(response);
 }
@@ -346,6 +380,9 @@ async function runPython(code: string): Promise<PyodideExecutionResult> {
   try {
     await initDuckDB();
 
+    // Resume OPFS handles (may have been suspended for multi-tab access)
+    await resumeHandlesIfNeeded();
+
     // Pre-fetch any lazy S3 files referenced in the code
     await ensureReferencedFilesReady(code);
 
@@ -475,6 +512,9 @@ async function runSQL(sql: string, viewName?: string): Promise<PyodideExecutionR
 
   try {
     await initDuckDB();
+
+    // Resume OPFS handles (may have been suspended for multi-tab access)
+    await resumeHandlesIfNeeded();
 
     // Pre-fetch any lazy S3 files referenced in the SQL
     await ensureReferencedFilesReady(sql);
@@ -715,6 +755,7 @@ self.onmessage = async (event: MessageEvent<WorkerRequest>) => {
           await initDuckDB();
           await initLocalStorage();
           postResponse({ type: "init", id: request.id, success: true });
+          scheduleHandleSuspend();
           // TODO: S3 mounting temporarily disabled — not stable yet
           // initS3Storage().catch(err => {
           //   console.warn(LOG_PREFIX, "Background S3 mount failed:", err);
@@ -733,12 +774,14 @@ self.onmessage = async (event: MessageEvent<WorkerRequest>) => {
       case "runPython": {
         const result = await runPython(request.code);
         postResponse({ type: "runPython", id: request.id, result });
+        scheduleHandleSuspend();
         break;
       }
 
       case "runSQL": {
         const result = await runSQL(request.sql, request.viewName);
         postResponse({ type: "runSQL", id: request.id, result });
+        scheduleHandleSuspend();
         break;
       }
 
@@ -782,6 +825,7 @@ self.onmessage = async (event: MessageEvent<WorkerRequest>) => {
           // Return the full path for the caller
           const fullPath = `${STORAGE_MOUNT_PATH}/${vfsPath}`;
           postResponse({ type: "writeFile", id: request.id, success: true, path: fullPath });
+          scheduleHandleSuspend();
         } catch (err) {
           postResponse({
             type: "writeFile",
@@ -856,6 +900,7 @@ self.onmessage = async (event: MessageEvent<WorkerRequest>) => {
           const vfsPath = toVFSPath(request.oldPath);
           await vfs.renameDirectory(vfsPath, request.newName);
           postResponse({ type: "renameDirectory", id: request.id, success: true });
+          scheduleHandleSuspend();
         } catch (err) {
           postResponse({
             type: "error",
@@ -873,6 +918,7 @@ self.onmessage = async (event: MessageEvent<WorkerRequest>) => {
           const targetDir = toVFSPath(request.targetDir);
           const newPath = await vfs.moveFile(sourcePath, targetDir);
           postResponse({ type: "moveFile", id: request.id, success: true, newPath });
+          scheduleHandleSuspend();
         } catch (err) {
           postResponse({
             type: "moveFile",
@@ -890,6 +936,7 @@ self.onmessage = async (event: MessageEvent<WorkerRequest>) => {
           const vfsPath = toVFSPath(request.path);
           const newPath = await vfs.renameFile(vfsPath, request.newName);
           postResponse({ type: "renameFile", id: request.id, success: true, newPath });
+          scheduleHandleSuspend();
         } catch (err) {
           postResponse({
             type: "renameFile",

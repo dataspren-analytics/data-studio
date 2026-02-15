@@ -129,6 +129,21 @@ export interface IVirtualFSDevice {
    */
   getLazyFilePaths(): string[];
 
+  // ========== Handle Lifecycle (multi-tab OPFS support) ==========
+
+  /**
+   * Close all OPFS sync handles so other tabs can access files.
+   * Emscripten nodes remain but with null handles — any sync read/write
+   * will fail until resumeHandles() is called.
+   */
+  suspendHandles(): Promise<void>;
+
+  /**
+   * Reopen all previously suspended sync handles.
+   * Must be called before executing code that may read files via Emscripten.
+   */
+  resumeHandles(): Promise<void>;
+
   // ========== Lifecycle ==========
 
   getMountPath(): string | null;
@@ -205,6 +220,11 @@ export function createVirtualFSDevice(FS: EmscriptenFS): IVirtualFSDevice {
 
   // Per-file write locks to prevent concurrent createSyncAccessHandle calls
   const writeLocks = new Map<string, Promise<void>>();
+
+  // Track device-backed files for suspend/resume (OPFS multi-tab support).
+  // Maps fullVFSPath → { mounted, relativePath } for files with sync handles.
+  const deviceBackedFiles = new Map<string, { mounted: MountedDevice; relativePath: string }>();
+  let handlesSuspended = false;
 
   /**
    * Shared stream ops for device-backed file nodes.
@@ -283,6 +303,9 @@ export function createVirtualFSDevice(FS: EmscriptenFS): IVirtualFSDevice {
         // Override stream ops to delegate to sync handle
         node.stream_ops = syncDeviceStreamOps;
 
+        // Track for suspend/resume
+        deviceBackedFiles.set(fullVFSPath, { mounted, relativePath });
+
         console.log(LOG_PREFIX, `Registered device-backed file: ${fullVFSPath} (size=${fileSize})`);
         return;
       }
@@ -304,6 +327,9 @@ export function createVirtualFSDevice(FS: EmscriptenFS): IVirtualFSDevice {
     relativePath: string
   ): void {
     const fullVFSPath = `${rootMountPath}/${mounted.subPath}/${relativePath}`;
+
+    // Stop tracking for suspend/resume
+    deviceBackedFiles.delete(fullVFSPath);
 
     // Remove from Emscripten FS first (prevents stale device ops)
     try {
@@ -762,6 +788,105 @@ export function createVirtualFSDevice(FS: EmscriptenFS): IVirtualFSDevice {
 
     getLazyFilePaths(): string[] {
       return Array.from(lazyFiles.keys());
+    },
+
+    // ========== Handle Lifecycle (multi-tab OPFS support) ==========
+
+    async suspendHandles(): Promise<void> {
+      if (handlesSuspended) return;
+
+      for (const [fullVFSPath, { mounted, relativePath }] of deviceBackedFiles) {
+        // Null out the Emscripten node's handle
+        try {
+          const node = FS.lookupPath(fullVFSPath).node;
+          node.deviceHandle = null;
+        } catch {
+          // Node may not exist
+        }
+
+        // Close the device's sync handle
+        if (mounted.device.closeSyncHandle) {
+          await mounted.device.closeSyncHandle(relativePath);
+        }
+      }
+
+      handlesSuspended = true;
+      console.log(LOG_PREFIX, `Suspended ${deviceBackedFiles.size} sync handles`);
+    },
+
+    async resumeHandles(): Promise<void> {
+      if (!handlesSuspended) return;
+
+      const toRemove: string[] = [];
+      let contended: string[] = [];
+
+      for (const [fullVFSPath, { mounted, relativePath }] of deviceBackedFiles) {
+        if (!mounted.device.openSyncHandle) continue;
+
+        const handle = await mounted.device.openSyncHandle(relativePath);
+        if (handle) {
+          try {
+            const node = FS.lookupPath(fullVFSPath).node;
+            node.deviceHandle = handle;
+            node.usedBytes = handle.getSize();
+          } catch {
+            toRemove.push(fullVFSPath);
+          }
+        } else {
+          // Distinguish "file deleted" from "handle locked by another tab"
+          const exists = await mounted.device.fileExists(relativePath);
+          if (exists) {
+            contended.push(fullVFSPath);
+          } else {
+            toRemove.push(fullVFSPath);
+          }
+        }
+      }
+
+      // Retry contended files — the other tab may release handles shortly
+      if (contended.length > 0) {
+        console.log(LOG_PREFIX, `${contended.length} files locked by another tab, retrying...`);
+        for (let attempt = 0; attempt < 3 && contended.length > 0; attempt++) {
+          await new Promise(r => setTimeout(r, 1000));
+          const stillContended: string[] = [];
+          for (const fullVFSPath of contended) {
+            const entry = deviceBackedFiles.get(fullVFSPath);
+            if (!entry?.mounted.device.openSyncHandle) continue;
+
+            const handle = await entry.mounted.device.openSyncHandle(entry.relativePath);
+            if (handle) {
+              try {
+                const node = FS.lookupPath(fullVFSPath).node;
+                node.deviceHandle = handle;
+                node.usedBytes = handle.getSize();
+              } catch {
+                toRemove.push(fullVFSPath);
+              }
+            } else {
+              stillContended.push(fullVFSPath);
+            }
+          }
+          contended = stillContended;
+        }
+
+        if (contended.length > 0) {
+          console.warn(LOG_PREFIX, `${contended.length} files still locked by another tab after retries`);
+        }
+      }
+
+      // Only remove files that were truly deleted
+      for (const path of toRemove) {
+        deviceBackedFiles.delete(path);
+        try { FS.unlink(path); } catch { /* may not exist */ }
+      }
+
+      handlesSuspended = false;
+      const resumed = deviceBackedFiles.size - contended.length - toRemove.length;
+      if (toRemove.length > 0 || contended.length > 0) {
+        console.log(LOG_PREFIX, `Resumed ${resumed} handles (${toRemove.length} deleted, ${contended.length} still locked)`);
+      } else {
+        console.log(LOG_PREFIX, `Resumed ${deviceBackedFiles.size} sync handles`);
+      }
     },
 
     // ========== Lifecycle ==========

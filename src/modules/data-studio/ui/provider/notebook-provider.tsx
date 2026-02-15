@@ -220,6 +220,27 @@ export function NotebookProviderInternal({
     };
   }, []);
 
+  // Remove notebooks whose .ipynb files no longer exist in the runtime file list.
+  // This handles cross-tab deletion: when another tab deletes a notebook file,
+  // the BroadcastChannel triggers a dataFiles refresh, and this effect cleans up.
+  const prevDataFilesRef = useRef(runtime.dataFiles);
+  useEffect(() => {
+    if (!isLoaded || runtime.dataFiles.length === 0) return;
+    // Only react when dataFiles actually shrinks (files were removed)
+    if (runtime.dataFiles.length >= prevDataFilesRef.current.length) {
+      prevDataFilesRef.current = runtime.dataFiles;
+      return;
+    }
+    prevDataFilesRef.current = runtime.dataFiles;
+
+    const existingPaths = new Set(runtime.dataFiles.map((f) => f.path));
+    setNotebooks((prev) => {
+      const filtered = prev.filter((n) => existingPaths.has(n.filePath));
+      if (filtered.length === prev.length) return prev;
+      return filtered;
+    });
+  }, [runtime.dataFiles, isLoaded]);
+
   const activeNotebook = notebooks.find((n) => n.filePath === activeFilePath) ?? null;
 
   // ============================================================================

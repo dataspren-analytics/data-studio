@@ -1,5 +1,6 @@
 "use client";
 
+import { FileX } from "lucide-react";
 import { Sidebar } from "../components/sidebar";
 import { getFileExtension } from "../viewers/types";
 import { CsvFileViewer } from "../viewers/csv-file-viewer";
@@ -43,10 +44,30 @@ interface ContentViewerProps {
 
 function ContentViewer({ filePath }: ContentViewerProps) {
   const runtime = useRuntime();
+  const { activeNotebook } = useNotebook();
   const extension = filePath ? getFileExtension(filePath) : null;
 
   if (!filePath) {
     return <NotebookCellsViewer />;
+  }
+
+  // Check if file still exists (only after runtime has loaded files)
+  if (runtime.isReady && runtime.dataFiles.length > 0) {
+    const fileExists = runtime.dataFiles.some((f) => f.path === filePath);
+    if (!fileExists) {
+      const fileName = filePath.split("/").pop() ?? filePath;
+      return (
+        <div className="flex-1 flex items-center justify-center bg-stone-50 dark:bg-background">
+          <div className="flex flex-col items-center gap-3 max-w-sm text-center px-4">
+            <FileX size={32} className="text-neutral-400 dark:text-neutral-600" />
+            <p className="text-sm font-medium text-neutral-700 dark:text-neutral-300">File not available</p>
+            <p className="text-xs text-neutral-500 dark:text-neutral-500">
+              <span className="font-mono">{fileName}</span> may have been deleted or moved.
+            </p>
+          </div>
+        </div>
+      );
+    }
   }
 
   switch (extension) {
