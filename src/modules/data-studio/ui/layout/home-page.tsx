@@ -1,7 +1,7 @@
 "use client";
 
-import { FileSpreadsheet, Music, Plus, Power } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { FileSpreadsheet, Loader2, Music, Plus, Power } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 // ============================================================================
 // Example Templates
@@ -117,13 +117,14 @@ function SampleLineChart() {
 // ============================================================================
 
 interface HomePageProps {
-  onCloneDemo: (demoId: string) => void;
+  onCloneDemo: (demoId: string) => void | Promise<void>;
   onCreateNotebook: () => void;
   onUploadFiles: (files: File[]) => void;
 }
 
 export function HomePage({ onCloneDemo, onCreateNotebook, onUploadFiles }: HomePageProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [cloningId, setCloningId] = useState<string | null>(null);
 
   const handleUploadClick = useCallback(() => {
     fileInputRef.current?.click();
@@ -215,10 +216,22 @@ export function HomePage({ onCloneDemo, onCreateNotebook, onUploadFiles }: HomeP
                 </div>
               </div>
               <button
-                onClick={() => onCloneDemo(demo.id)}
-                className="shrink-0 self-center px-3 py-1.5 text-xs font-medium rounded-md bg-brand text-white hover:opacity-90 transition-opacity"
+                disabled={cloningId !== null}
+                onClick={async () => {
+                  setCloningId(demo.id);
+                  try {
+                    await onCloneDemo(demo.id);
+                  } finally {
+                    setCloningId(null);
+                  }
+                }}
+                className="shrink-0 self-center px-3 py-1.5 text-xs font-medium rounded-md bg-brand text-white hover:opacity-90 transition-opacity disabled:opacity-60 disabled:cursor-not-allowed"
               >
-                Clone
+                {cloningId === demo.id ? (
+                  <Loader2 size={14} className="animate-spin" />
+                ) : (
+                  "Clone"
+                )}
               </button>
             </div>
           ))}
