@@ -225,13 +225,12 @@ export function HomePage({ onCloneDemo, onCreateNotebook, onUploadFiles }: HomeP
                     setCloningId(null);
                   }
                 }}
-                className="shrink-0 self-center px-3 py-1.5 text-xs font-medium rounded-md bg-brand text-white hover:opacity-90 transition-opacity disabled:opacity-60 disabled:cursor-not-allowed"
+                className="flex items-center gap-1.5 shrink-0 self-center px-3 py-1.5 text-xs font-medium rounded-md bg-brand text-white hover:opacity-90 transition-opacity disabled:opacity-60 disabled:cursor-not-allowed"
               >
-                {cloningId === demo.id ? (
-                  <Loader2 size={14} className="animate-spin" />
-                ) : (
-                  "Clone"
+                {cloningId === demo.id && (
+                  <Loader2 size={12} className="animate-spin" />
                 )}
+                Clone
               </button>
             </div>
           ))}
