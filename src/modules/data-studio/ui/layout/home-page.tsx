@@ -216,7 +216,7 @@ export function HomePage({ onCloneDemo, onCreateNotebook, onUploadFiles }: HomeP
               </div>
               <button
                 onClick={() => onCloneDemo(demo.id)}
-                className="shrink-0 self-center px-3 py-1.5 text-xs font-medium rounded-md bg-neutral-900 dark:bg-neutral-100 text-white dark:text-neutral-900 hover:bg-neutral-800 dark:hover:bg-neutral-200 transition-colors"
+                className="shrink-0 self-center px-3 py-1.5 text-xs font-medium rounded-md bg-brand text-white hover:opacity-90 transition-opacity"
               >
                 Clone
               </button>
