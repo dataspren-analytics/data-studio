@@ -348,23 +348,35 @@ const ExcelFileViewerInner = memo(function ExcelFileViewerInner({
     if (!selection) return null;
     const bounds = getSelectionBounds(selection);
     
-    const values: string[] = [];
+    // First pass: check if types are mixed (has both numbers and strings)
+    let hasNumber = false;
+    let hasString = false;
+    const rawValues: Array<{ r: number; c: number; raw: string }> = [];
     for (let r = bounds.minRow; r <= bounds.maxRow; r++) {
       for (let c = bounds.minCol; c <= bounds.maxCol; c++) {
-        const rawValue = getCellValue(r, c, sheetData.grid);
-        let sqlValue: string;
-        if (rawValue === "") {
-          sqlValue = "NULL";
-        } else {
-          const numValue = Number(rawValue);
-          if (!isNaN(numValue)) {
-            sqlValue = String(numValue);
-          } else {
-            sqlValue = `'${rawValue.replace(/'/g, "''")}'`;
-          }
+        const raw = getCellValue(r, c, sheetData.grid);
+        rawValues.push({ r, c, raw });
+        if (raw !== "" && !isNaN(Number(raw))) {
+          hasNumber = true;
+        } else if (raw !== "") {
+          hasString = true;
         }
-        values.push(`(${r}, ${c}, ${sqlValue})`);
       }
+    }
+    const forceStrings = hasNumber && hasString;
+
+    // Second pass: build VALUES, casting numbers to strings only when mixed
+    const values: string[] = [];
+    for (const { r, c, raw } of rawValues) {
+      let sqlValue: string;
+      if (raw === "") {
+        sqlValue = "NULL";
+      } else if (!forceStrings && !isNaN(Number(raw))) {
+        sqlValue = String(Number(raw));
+      } else {
+        sqlValue = `'${raw.replace(/'/g, "''")}'`;
+      }
+      values.push(`(${r}, ${c}, ${sqlValue})`);
     }
 
     return `WITH cells(row, col, value) AS (\n  VALUES\n    ${values.join(",\n    ")}\n)\n`;
