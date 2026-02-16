@@ -2,7 +2,9 @@
 
 Developed by [DataSpren](https://dataspren.com)
 
-A browser-based data notebook for exploring, transforming, and visualizing data. No backend required. **Try it at [local.dataspren.com](https://local.dataspren.com).**
+A browser-based data notebook for exploring, transforming, and visualizing data. No backend required.
+
+**Try it at [local.dataspren.com](https://local.dataspren.com).**
 
 ![Showcase](.github/assets/Showcase.gif)
 
