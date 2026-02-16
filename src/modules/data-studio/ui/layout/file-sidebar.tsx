@@ -1359,18 +1359,10 @@ function getExportFormats(ext: string | undefined) {
     formats.push(
       { format: "json", label: "JSON", icon: CarbonJson },
       { format: "parquet", label: "Parquet", icon: CarbonDataTable },
-      { format: "xlsx", label: "Excel", icon: CarbonXls },
     );
   } else if (ext === "parquet") {
     formats.push(
       { format: "csv", label: "CSV", icon: CarbonCsv },
-      { format: "json", label: "JSON", icon: CarbonJson },
-      { format: "xlsx", label: "Excel", icon: CarbonXls },
-    );
-  } else if (ext === "xlsx" || ext === "xls") {
-    formats.push(
-      { format: "csv", label: "CSV", icon: CarbonCsv },
-      { format: "parquet", label: "Parquet", icon: CarbonDataTable },
       { format: "json", label: "JSON", icon: CarbonJson },
     );
   }
