@@ -7,7 +7,10 @@ A browser-based data notebook for exploring, transforming, and visualizing data.
 **Try it at [local.dataspren.com](https://local.dataspren.com).**
 
 ## Demo
-![Showcase](.github/assets/Showcase.gif)
+<img src=".github/assets/Showcase.gif" alt="Showcase" width="600">
+
+### Excel Editing
+<img src=".github/assets/Showcase_Excel.gif" alt="Excel Showcase" width="600">
 
 
 Python and SQL run directly in your browser via WebAssembly (Pyodide + DuckDB). Files are stored locally using the Origin Private File System.
