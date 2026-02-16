@@ -10,7 +10,7 @@ A browser-based data notebook for exploring, transforming, and visualizing data.
 <img src=".github/assets/Showcase.gif" alt="Showcase" width="600">
 
 ### Excel Editing
-<img src=".github/assets/Showcase_Excel.gif" alt="Excel Showcase" width="600">
+<img src=".github/assets/Showcase_Excel.gif" alt="Excel Showcase" width="450">
 
 
 Python and SQL run directly in your browser via WebAssembly (Pyodide + DuckDB). Files are stored locally using the Origin Private File System.
