@@ -1,5 +1,7 @@
 # DataSpren Data Studio
 
+![Showcase](.github/assets/Showcase.gif)
+
 A browser-based data notebook for exploring, transforming, and visualizing data. No backend required. **Try it at [local.dataspren.com](https://local.dataspren.com).**
 
 Python and SQL run directly in your browser via WebAssembly (Pyodide + DuckDB). Files are stored locally using the Origin Private File System.
