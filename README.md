@@ -6,6 +6,7 @@ A browser-based data notebook for exploring, transforming, and visualizing data.
 
 **Try it at [local.dataspren.com](https://local.dataspren.com).**
 
+## Demo
 ![Showcase](.github/assets/Showcase.gif)
 
 
