@@ -1,8 +1,11 @@
 # DataSpren Data Studio
 
-![Showcase](.github/assets/Showcase.gif)
+Developed by [DataSpren](https://dataspren.com)
 
 A browser-based data notebook for exploring, transforming, and visualizing data. No backend required. **Try it at [local.dataspren.com](https://local.dataspren.com).**
+
+![Showcase](.github/assets/Showcase.gif)
+
 
 Python and SQL run directly in your browser via WebAssembly (Pyodide + DuckDB). Files are stored locally using the Origin Private File System.
 
@@ -13,7 +16,7 @@ Python and SQL run directly in your browser via WebAssembly (Pyodide + DuckDB). 
 - **Data visualization**: Built-in charting (bar, line, area, scatter, pie) powered by ECharts
 - **File management**: Upload, browse, and query CSV, Parquet, JSON, and Excel files
 - **Data validation**: Assert cells for uniqueness, not-null, accepted values, and custom SQL checks
-- **Dark mode**: Toggle between light and dark themes
+- **Excel editing with SQL**: Query and transform Excel files directly using SQL
 
 ## Getting Started
 
