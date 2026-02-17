@@ -27,6 +27,7 @@ import {
   type AssertTest,
   type CodeCell as CodeCellType,
   type DataSprenCellType,
+  type TableData,
   type TableInfo,
   type VisualizeConfig,
 } from "../../../runtime";
@@ -392,9 +393,12 @@ export function CodeCell({
           {isSQL && activeTab === "insights" && (
             <InsightsPanel
               tableData={tableData}
+              viewName={cell.metadata.viewName}
               vizConfig={cell.metadata.visualizeConfig as VisualizeConfig | undefined}
+              vizData={(cell.metadata.visualizeData as TableData | null) ?? null}
               isDark={isDark}
               onUpdateVisualizeConfig={(config) => onUpdateMetadata?.({ visualizeConfig: config })}
+              onUpdateVisualizeData={(data) => onUpdateMetadata?.({ visualizeData: data })}
             />
           )}
 
