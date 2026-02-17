@@ -1,14 +1,15 @@
 "use client";
 
 import { cn } from "@/lib/utils";
-import { BarChart3, ChevronDown, LineChart, PieChart, ScatterChart, TrendingUp } from "lucide-react";
-import { useEffect, useMemo, useRef } from "react";
+import { BarChart3, LineChart, PieChart, ScatterChart, TrendingUp } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   type AggregationType,
   type TableData,
   type VisualizeChartType,
   type VisualizeConfig,
 } from "../../../runtime";
+import { useRuntime } from "../../provider/runtime-provider";
 import { InlineSelect } from "../inline-select";
 
 // ─── EChart (lazy-loaded) ──────────────────────────────────────────────
@@ -68,47 +69,9 @@ const aggregationLabels: Record<AggregationType, string> = {
   max: "Max",
 };
 
+const VIZ_MAX_ROWS = 500;
+
 // ─── Helpers ───────────────────────────────────────────────────────────
-
-function aggregateData(
-  tableData: TableData,
-  xColumn: string,
-  yColumns: string[],
-  aggregation: AggregationType,
-): { xValues: unknown[]; yData: Record<string, number[]> } {
-  const groups = new Map<string, number[][]>();
-
-  for (const row of tableData) {
-    const key = String(row[xColumn] ?? "");
-    if (!groups.has(key)) groups.set(key, yColumns.map(() => []));
-    const bucket = groups.get(key)!;
-    for (let i = 0; i < yColumns.length; i++) {
-      bucket[i].push(Number(row[yColumns[i]] ?? 0));
-    }
-  }
-
-  const xValues: unknown[] = [];
-  const yData: Record<string, number[]> = {};
-  for (const yCol of yColumns) yData[yCol] = [];
-
-  for (const [xVal, bucket] of groups) {
-    xValues.push(xVal);
-    for (let i = 0; i < yColumns.length; i++) {
-      const vals = bucket[i];
-      let result: number;
-      switch (aggregation) {
-        case "sum": result = vals.reduce((a, b) => a + b, 0); break;
-        case "count": result = vals.length; break;
-        case "avg": result = vals.reduce((a, b) => a + b, 0) / vals.length; break;
-        case "min": result = Math.min(...vals); break;
-        case "max": result = Math.max(...vals); break;
-      }
-      yData[yColumns[i]].push(result);
-    }
-  }
-
-  return { xValues, yData };
-}
 
 function hasNonUniqueX(tableData: TableData, xColumn: string): boolean {
   const seen = new Set<string>();
@@ -120,13 +83,32 @@ function hasNonUniqueX(tableData: TableData, xColumn: string): boolean {
   return false;
 }
 
+/** Build the DuckDB query to fetch visualization data. */
+function buildVizQuery(
+  viewName: string,
+  config: VisualizeConfig,
+  needsAggregation: boolean,
+): string {
+  const { xColumn, yColumns, aggregation } = config;
+  const quote = (col: string) => `"${col}"`;
+
+  if (needsAggregation) {
+    const agg = aggregation || "sum";
+    const sqlAgg = agg === "avg" ? "AVG" : agg.toUpperCase();
+    const yAggs = yColumns.map(col => `${sqlAgg}(${quote(col)}) as ${quote(col)}`).join(", ");
+    return `SELECT ${quote(xColumn)}, ${yAggs} FROM ${quote(viewName)} GROUP BY ${quote(xColumn)} ORDER BY ${quote(xColumn)} LIMIT ${VIZ_MAX_ROWS}`;
+  }
+
+  const cols = [xColumn, ...yColumns].map(quote).join(", ");
+  return `SELECT ${cols} FROM ${quote(viewName)} ORDER BY ${quote(xColumn)} LIMIT ${VIZ_MAX_ROWS}`;
+}
+
 function buildChartOptions(
-  tableData: TableData,
+  vizData: TableData,
   config: VisualizeConfig,
   isDark: boolean,
-  needsAggregation: boolean,
 ): Record<string, unknown> | null {
-  const { chartType, xColumn, yColumns, aggregation, groupBy } = config;
+  const { chartType, xColumn, yColumns } = config;
   if (!xColumn || yColumns.length === 0) return null;
 
   const palette = [
@@ -137,7 +119,6 @@ function buildChartOptions(
   const textColor = isDark ? "#a1a1aa" : "#71717a";
   const axisLineColor = isDark ? "#3f3f46" : "#d4d4d8";
   const splitLineColor = isDark ? "rgba(63,63,70,0.5)" : "rgba(228,228,231,0.8)";
-  const agg = aggregation || "sum";
   const animation = false;
 
   const baseXAxis = {
@@ -172,6 +153,8 @@ function buildChartOptions(
     textStyle: { color: isDark ? "#e4e4e7" : "#27272a", fontSize: 12 },
   };
 
+  const fmt = (v: number) => typeof v === "number" ? v.toLocaleString(undefined, { maximumFractionDigits: 2 }) : v;
+
   const tooltip = {
     trigger: "axis" as const,
     ...tooltipStyle,
@@ -179,7 +162,7 @@ function buildChartOptions(
       if (!Array.isArray(params) || params.length === 0) return "";
       const xVal = (params[0] as unknown as { axisValueLabel: string }).axisValueLabel;
       const header = `<div style="font-weight:600;margin-bottom:4px">${xColumn}: ${xVal}</div>`;
-      const rows = params.map((p) => `<div>${p.marker} ${p.seriesName}: ${p.value}</div>`).join("");
+      const rows = params.map((p) => `<div>${p.marker} ${p.seriesName}: <b>${fmt(p.value)}</b></div>`).join("");
       return header + rows;
     },
   };
@@ -188,7 +171,7 @@ function buildChartOptions(
     trigger: "item" as const,
     ...tooltipStyle,
     formatter: (p: { marker: string; seriesName: string; data: [string | number, number] }) =>
-      `${p.marker} <b>${p.seriesName}</b><br/>${xColumn}: ${p.data[0]}<br/>${yColumns[0]}: ${p.data[1]}`,
+      `${p.marker} <b>${p.seriesName}</b><br/>${xColumn}: ${p.data[0]}<br/>${yColumns[0]}: <b>${fmt(p.data[1])}</b>`,
   };
 
   const legend = yColumns.length > 1 ? {
@@ -211,14 +194,9 @@ function buildChartOptions(
       trigger: "item" as const,
       ...tooltipStyle,
       formatter: (p: { name: string; value: number; percent: number; marker: string }) =>
-        `<b>${xColumn}: ${p.name}</b><br/>${yColumns[0]}: ${p.value} (${p.percent}%)`,
+        `<b>${xColumn}: ${p.name}</b><br/>${yColumns[0]}: <b>${fmt(p.value)}</b> (${p.percent}%)`,
     };
-    const pieData = needsAggregation
-      ? (() => {
-          const { xValues, yData } = aggregateData(tableData, xColumn, yColumns.slice(0, 1), agg);
-          return xValues.map((x, i) => ({ name: String(x), value: yData[yColumns[0]][i] }));
-        })()
-      : tableData.map((row) => ({ name: String(row[xColumn] ?? ""), value: Number(row[yColumns[0]] ?? 0) }));
+    const pieData = vizData.map((row) => ({ name: String(row[xColumn] ?? ""), value: Number(row[yColumns[0]] ?? 0) }));
     return {
       animation,
       backgroundColor: "transparent",
@@ -242,106 +220,38 @@ function buildChartOptions(
     };
   }
 
-  if (groupBy && groupBy.length > 0) {
-    const groups = new Map<string, TableData>();
-    for (const row of tableData) {
-      const key = groupBy.map((col) => String(row[col] ?? "")).join(" / ");
-      if (!groups.has(key)) groups.set(key, []);
-      groups.get(key)!.push(row);
-    }
-    const groupNames = Array.from(groups.keys());
-    const groupLegend = { show: true, top: 0, textStyle: { color: textColor, fontSize: 11 } };
-
-    if (chartType === "scatter") {
-      const uniqueX = Array.from(new Set(tableData.map((row) => String(row[xColumn] ?? ""))));
-      const series = groupNames.flatMap((gName) => {
-        const rows = groups.get(gName)!;
-        return yColumns.map((yCol) => ({
-          type: "scatter" as const,
-          name: yColumns.length > 1 ? `${gName} (${yCol})` : gName,
-          data: rows.map((row) => [String(row[xColumn] ?? ""), Number(row[yCol] ?? 0)]),
-          symbolSize: 6,
-        }));
-      });
-      return {
-        animation,
-        backgroundColor: "transparent",
-        color: palette,
-        grid: { ...baseGrid, top: 36 },
-        xAxis: { ...baseXAxis, data: uniqueX },
-        yAxis: baseYAxis,
-        dataZoom: [{ type: "inside" }],
-        tooltip: scatterTooltip,
-        legend: groupLegend,
-        series,
-      };
-    }
-
-    const allXValues = Array.from(new Set(tableData.map((row) => String(row[xColumn] ?? ""))));
-    const series = groupNames.flatMap((gName) => {
-      const rows = groups.get(gName)!;
-      return yColumns.map((yCol) => {
-        const dataMap = new Map<string, number[]>();
-        for (const row of rows) {
-          const xKey = String(row[xColumn] ?? "");
-          if (!dataMap.has(xKey)) dataMap.set(xKey, []);
-          dataMap.get(xKey)!.push(Number(row[yCol] ?? 0));
-        }
-        const data = allXValues.map((xVal) => {
-          const vals = dataMap.get(xVal);
-          if (!vals || vals.length === 0) return 0;
-          switch (agg) {
-            case "sum": return vals.reduce((a, b) => a + b, 0);
-            case "count": return vals.length;
-            case "avg": return vals.reduce((a, b) => a + b, 0) / vals.length;
-            case "min": return Math.min(...vals);
-            case "max": return Math.max(...vals);
-          }
-        });
-        return makeSeries(yColumns.length > 1 ? `${gName} (${yCol})` : gName, data);
-      });
-    });
-    return {
-      animation,
-      backgroundColor: "transparent",
-      color: palette,
-      grid: { ...baseGrid, top: 36 },
-      xAxis: { ...baseXAxis, data: allXValues },
-      yAxis: baseYAxis,
-      dataZoom: [{ type: "inside" }],
-      tooltip,
-      legend: groupLegend,
-      series,
-    };
-  }
-
-  if (needsAggregation) {
-    const { xValues, yData } = aggregateData(tableData, xColumn, yColumns, agg);
+  if (chartType === "scatter") {
     return {
       animation,
       backgroundColor: "transparent",
       color: palette,
       grid: legend ? { ...baseGrid, top: 36 } : baseGrid,
-      xAxis: { ...baseXAxis, data: xValues.map(String) },
+      xAxis: { ...baseXAxis, data: vizData.map((row) => String(row[xColumn] ?? "")) },
       yAxis: baseYAxis,
       dataZoom: [{ type: "inside" }],
-      tooltip,
+      tooltip: scatterTooltip,
       legend,
-      series: yColumns.map((yCol) => makeSeries(yCol, yData[yCol])),
+      series: yColumns.map((yCol) => ({
+        type: "scatter" as const,
+        name: yCol,
+        data: vizData.map((row) => [String(row[xColumn] ?? ""), Number(row[yCol] ?? 0)]),
+        symbolSize: 6,
+      })),
     };
   }
 
+  // Bar, line, area — vizData is already aggregated if needed
   return {
     animation,
     backgroundColor: "transparent",
     color: palette,
     grid: legend ? { ...baseGrid, top: 36 } : baseGrid,
-    xAxis: { ...baseXAxis, data: tableData.map((row) => String(row[xColumn] ?? "")) },
+    xAxis: { ...baseXAxis, data: vizData.map((row) => String(row[xColumn] ?? "")) },
     yAxis: baseYAxis,
     dataZoom: [{ type: "inside" }],
     tooltip,
     legend,
-    series: yColumns.map((yCol) => makeSeries(yCol, tableData.map((row) => Number(row[yCol] ?? 0)))),
+    series: yColumns.map((yCol) => makeSeries(yCol, vizData.map((row) => Number(row[yCol] ?? 0)))),
   };
 }
 
@@ -349,12 +259,18 @@ function buildChartOptions(
 
 export interface InsightsPanelProps {
   tableData: TableData | null;
+  viewName?: string;
   vizConfig: VisualizeConfig | undefined;
+  vizData: TableData | null;
   isDark: boolean;
   onUpdateVisualizeConfig?: (config: VisualizeConfig) => void;
+  onUpdateVisualizeData?: (data: TableData | null) => void;
 }
 
-export function InsightsPanel({ tableData, vizConfig, isDark, onUpdateVisualizeConfig }: InsightsPanelProps) {
+export function InsightsPanel({ tableData, viewName, vizConfig, vizData: persistedVizData, isDark, onUpdateVisualizeConfig, onUpdateVisualizeData }: InsightsPanelProps) {
+  const { runSQL } = useRuntime();
+  const [vizData, setVizData] = useState<TableData | null>(persistedVizData);
+
   const tableColumns = useMemo(() => {
     if (!tableData || tableData.length === 0) return [];
     return Object.keys(tableData[0]);
@@ -390,10 +306,32 @@ export function InsightsPanel({ tableData, vizConfig, isDark, onUpdateVisualizeC
     return hasNonUniqueX(tableData, effectiveVizConfig.xColumn);
   }, [tableData, effectiveVizConfig]);
 
+  // Fetch visualization data from DuckDB whenever config or view changes
+  useEffect(() => {
+    if (!viewName || !effectiveVizConfig) return;
+
+    const query = buildVizQuery(viewName, effectiveVizConfig, needsAggregation);
+
+    let cancelled = false;
+    runSQL(query).then(result => {
+      if (cancelled) return;
+      const data = result.tableData ?? null;
+      setVizData(data);
+      onUpdateVisualizeData?.(data);
+    }).catch(() => {
+      if (cancelled) return;
+      setVizData(null);
+      onUpdateVisualizeData?.(null);
+    });
+
+    return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewName, effectiveVizConfig, needsAggregation, runSQL]);
+
   const chartOptions = useMemo(() => {
-    if (!effectiveVizConfig || !tableData) return null;
-    return buildChartOptions(tableData, effectiveVizConfig, isDark, needsAggregation);
-  }, [effectiveVizConfig, tableData, isDark, needsAggregation]);
+    if (!effectiveVizConfig || !vizData || vizData.length === 0) return null;
+    return buildChartOptions(vizData, effectiveVizConfig, isDark);
+  }, [effectiveVizConfig, vizData, isDark]);
 
   if (!tableData) {
     return (

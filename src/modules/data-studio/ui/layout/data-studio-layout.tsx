@@ -1,8 +1,8 @@
 "use client";
 
-import { AlertTriangle, Loader2 } from "lucide-react";
+import { AlertTriangle } from "lucide-react";
 import type { ReactNode } from "react";
-import { useNotebook, useRuntime } from "../provider";
+import { useRuntime } from "../provider";
 
 interface DataStudioLayoutProps {
   header: ReactNode;
@@ -11,7 +11,6 @@ interface DataStudioLayoutProps {
 }
 
 export function DataStudioLayout({ header, fileExplorer, content }: DataStudioLayoutProps) {
-  const { isLoaded } = useNotebook();
   const runtime = useRuntime();
 
   if (runtime.error) {
@@ -27,17 +26,6 @@ export function DataStudioLayout({ header, fileExplorer, content }: DataStudioLa
           >
             Restart runtime
           </button>
-        </div>
-      </div>
-    );
-  }
-
-  if (!isLoaded) {
-    return (
-      <div className="h-svh flex items-center justify-center bg-[#1a1a1f]">
-        <div className="flex items-center gap-2 text-neutral-400">
-          <Loader2 size={16} className="animate-spin" />
-          <span className="text-sm">Loading notebooks...</span>
         </div>
       </div>
     );

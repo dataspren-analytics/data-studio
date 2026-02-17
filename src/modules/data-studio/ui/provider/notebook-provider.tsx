@@ -11,6 +11,7 @@ import {
   type ReactNode,
 } from "react";
 import type { NotebookCell } from "../../runtime";
+import { parseNotebook } from "../../runtime/core/nbformat";
 import {
   getRelativePath,
   listNotebooks as listNotebooksUtil,
@@ -18,6 +19,7 @@ import {
   writeNotebook as writeNotebookUtil,
   type NotebookInfo,
 } from "../../runtime/notebook-utils";
+import { listOPFSFiles, readOPFSFile } from "../../runtime/opfs-list";
 import { initialCells } from "../lib/constants";
 import type { NotebookContextValue, NotebookEntry } from "../lib/types";
 import { exportNotebook, generateId } from "../lib/utils";
@@ -169,49 +171,76 @@ export function NotebookProviderInternal({
     }
   }, [execution, configInitialCells, activeFilePath]);
 
-  // Load notebooks on mount - wait for runtime to be ready
-  const loadNotebooksRef = useRef(false);
+  // Early notebook loading: read .ipynb files directly from OPFS on the
+  // main thread so notebooks are visible before the runtime is ready.
+  const earlyLoadRef = useRef(false);
   useEffect(() => {
-    if (ephemeral) {
-      const defaultEntry = createNotebookEntry("Demo", "", configInitialCells, configInitialCells);
-      setNotebooks([defaultEntry]);
-      setActiveFilePath(defaultEntry.filePath);
-      setIsLoaded(true);
-      return;
-    }
+    if (ephemeral || earlyLoadRef.current) return;
+    earlyLoadRef.current = true;
 
-    if (!runtime.isReady || loadNotebooksRef.current) return;
-    loadNotebooksRef.current = true;
-
-    async function loadNotebooks() {
+    async function loadFromOPFS() {
       try {
-        const notebookInfos = await listNotebooksUtil(execution);
+        const files = await listOPFSFiles();
+        const notebookFiles = files.filter(
+          (f) => !f.isDirectory && f.path.endsWith(".ipynb"),
+        );
 
-        if (notebookInfos.length === 0) {
-          setNotebooks([]);
-        } else {
-          const entries: NotebookEntry[] = await Promise.all(
-            notebookInfos.map(async (info: NotebookInfo) => {
-              const doc = await readNotebookUtil(execution, info.path);
-              return {
-                filePath: info.path,
-                name: info.name,
-                updated_at: info.updatedAt,
-                document: doc,
-              };
-            })
-          );
-          setNotebooks(entries);
+        if (notebookFiles.length === 0) {
+          setIsLoaded(true);
+          return;
+        }
+
+        const entries: NotebookEntry[] = [];
+        for (const file of notebookFiles) {
+          try {
+            // Convert /mnt/local/path.ipynb to OPFS-relative path
+            const opfsPath = file.path.replace(/^\/mnt\/local\//, "");
+            const data = await readOPFSFile(opfsPath);
+            const content = new TextDecoder().decode(data);
+            const doc = parseNotebook(content);
+            const name =
+              doc.metadata.dataspren?.name ??
+              file.name.replace(".ipynb", "");
+            const updatedAt =
+              doc.metadata.dataspren?.updated_at ?? Date.now();
+            entries.push({
+              filePath: file.path,
+              name,
+              updated_at: updatedAt,
+              document: doc,
+            });
+          } catch (e) {
+            console.warn(
+              "[NotebookProvider] Failed to parse notebook from OPFS:",
+              file.path,
+              e,
+            );
+          }
+        }
+
+        entries.sort((a, b) => b.updated_at - a.updated_at);
+
+        setNotebooks(entries);
+        if (entries.length > 0) {
           setActiveFilePath(entries[0].filePath);
         }
       } catch (err) {
-        console.error("Failed to load notebooks:", err);
-        setNotebooks([]);
+        console.warn("[NotebookProvider] Early OPFS load failed:", err);
       }
       setIsLoaded(true);
     }
-    loadNotebooks();
-  }, [ephemeral, runtime.isReady, configInitialCells, execution, runtime]);
+
+    loadFromOPFS();
+  }, [ephemeral]);
+
+  // Ephemeral mode: create a demo notebook in-memory
+  useEffect(() => {
+    if (!ephemeral) return;
+    const defaultEntry = createNotebookEntry("Demo", "", configInitialCells, configInitialCells);
+    setNotebooks([defaultEntry]);
+    setActiveFilePath(defaultEntry.filePath);
+    setIsLoaded(true);
+  }, [ephemeral, configInitialCells]);
 
   // Cleanup save timeout
   useEffect(() => {

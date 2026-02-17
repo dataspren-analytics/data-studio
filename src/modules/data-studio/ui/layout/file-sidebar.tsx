@@ -1245,11 +1245,11 @@ function FileTreeNodeComponent({
               if (e.key === "Escape") onCancelRename();
             }}
             onClick={(e) => e.stopPropagation()}
-            className="h-5 px-1 py-0 text-[11px] border-0 bg-white dark:bg-muted focus-visible:ring-1 focus-visible:ring-neutral-950 dark:focus-visible:ring-ring flex-1"
+            className="h-5 px-1 py-0 text-xs border-0 bg-white dark:bg-muted focus-visible:ring-1 focus-visible:ring-neutral-950 dark:focus-visible:ring-ring flex-1"
           />
         ) : (
           <span className={cn(
-            "font-medium truncate flex-1 text-[11px]",
+            "font-medium truncate flex-1 text-xs",
             "text-neutral-700 dark:text-neutral-300",
             isActiveFile && "text-neutral-950 dark:text-neutral-100"
           )}>
@@ -1289,7 +1289,7 @@ function FileTreeNodeComponent({
             style={{ paddingLeft: `${(depth + 1) * 10 + 4}px` }}
           >
             <Loader2 size={12} className="animate-spin text-neutral-400 shrink-0" />
-            <span className="font-medium text-[11px] text-neutral-400 dark:text-neutral-500 truncate">
+            <span className="font-medium text-xs text-neutral-400 dark:text-neutral-500 truncate">
               {transferring.fileName}
             </span>
           </div>
@@ -1504,7 +1504,7 @@ function DragOverlayItem({ node }: { node: FileTreeNode }) {
   return (
     <div className="flex items-center gap-1.5 px-2 py-1 text-xs bg-white dark:bg-neutral-800 shadow-lg border border-neutral-200 dark:border-neutral-700">
       <FileIconForName name={node.name} size={12} className="text-neutral-500 shrink-0" />
-      <span className="font-medium text-neutral-700 dark:text-neutral-300 text-[11px]">
+      <span className="font-medium text-neutral-700 dark:text-neutral-300 text-xs">
         {node.name}
       </span>
     </div>
