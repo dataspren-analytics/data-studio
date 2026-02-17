@@ -1,6 +1,6 @@
 "use client";
 
-import { FileX } from "lucide-react";
+import { FileX, Loader2 } from "lucide-react";
 import { Sidebar } from "../components/sidebar";
 import { getFileExtension } from "../viewers/types";
 import { CsvFileViewer } from "../viewers/csv-file-viewer";
@@ -68,6 +68,18 @@ function ContentViewer({ filePath }: ContentViewerProps) {
         </div>
       );
     }
+  }
+
+  // Show a loading state for data files when the runtime isn't ready yet
+  if (!runtime.isReady && extension !== ".ipynb") {
+    return (
+      <div className="flex-1 flex items-center justify-center bg-stone-50 dark:bg-background">
+        <div className="flex items-center gap-2 text-neutral-400">
+          <Loader2 size={16} className="animate-spin" />
+          <span className="text-sm">Loading runtime...</span>
+        </div>
+      </div>
+    );
   }
 
   switch (extension) {

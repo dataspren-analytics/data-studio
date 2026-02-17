@@ -19,6 +19,7 @@ import type {
   TableInfo,
 } from "../../runtime";
 import { getRelativePath } from "../../runtime/notebook-utils";
+import { listOPFSFiles } from "../../runtime/opfs-list";
 import type { RuntimeContextValue } from "../lib/types";
 
 const RuntimeContext = createContext<RuntimeContextValue | null>(null);
@@ -81,6 +82,19 @@ export function RuntimeProvider({ execution, autoInit = true, children }: Runtim
       };
     });
   }, [dataFiles]);
+
+  // Early file listing: read OPFS directly from the main thread so the
+  // file tree is visible before the Pyodide worker finishes initializing.
+  const earlyLoadDoneRef = useRef(false);
+  useEffect(() => {
+    if (earlyLoadDoneRef.current) return;
+    earlyLoadDoneRef.current = true;
+    listOPFSFiles().then((files) => {
+      if (files.length > 0) {
+        setDataFiles((prev) => (prev.length === 0 ? files : prev));
+      }
+    });
+  }, []);
 
   // Auto-init runtime
   const initStartedRef = useRef(false);
