@@ -153,6 +153,8 @@ function buildChartOptions(
     textStyle: { color: isDark ? "#e4e4e7" : "#27272a", fontSize: 12 },
   };
 
+  const fmt = (v: number) => typeof v === "number" ? v.toLocaleString(undefined, { maximumFractionDigits: 2 }) : v;
+
   const tooltip = {
     trigger: "axis" as const,
     ...tooltipStyle,
@@ -160,7 +162,7 @@ function buildChartOptions(
       if (!Array.isArray(params) || params.length === 0) return "";
       const xVal = (params[0] as unknown as { axisValueLabel: string }).axisValueLabel;
       const header = `<div style="font-weight:600;margin-bottom:4px">${xColumn}: ${xVal}</div>`;
-      const rows = params.map((p) => `<div>${p.marker} ${p.seriesName}: ${p.value}</div>`).join("");
+      const rows = params.map((p) => `<div>${p.marker} ${p.seriesName}: <b>${fmt(p.value)}</b></div>`).join("");
       return header + rows;
     },
   };
@@ -169,7 +171,7 @@ function buildChartOptions(
     trigger: "item" as const,
     ...tooltipStyle,
     formatter: (p: { marker: string; seriesName: string; data: [string | number, number] }) =>
-      `${p.marker} <b>${p.seriesName}</b><br/>${xColumn}: ${p.data[0]}<br/>${yColumns[0]}: ${p.data[1]}`,
+      `${p.marker} <b>${p.seriesName}</b><br/>${xColumn}: ${p.data[0]}<br/>${yColumns[0]}: <b>${fmt(p.data[1])}</b>`,
   };
 
   const legend = yColumns.length > 1 ? {
@@ -192,7 +194,7 @@ function buildChartOptions(
       trigger: "item" as const,
       ...tooltipStyle,
       formatter: (p: { name: string; value: number; percent: number; marker: string }) =>
-        `<b>${xColumn}: ${p.name}</b><br/>${yColumns[0]}: ${p.value} (${p.percent}%)`,
+        `<b>${xColumn}: ${p.name}</b><br/>${yColumns[0]}: <b>${fmt(p.value)}</b> (${p.percent}%)`,
     };
     const pieData = vizData.map((row) => ({ name: String(row[xColumn] ?? ""), value: Number(row[yColumns[0]] ?? 0) }));
     return {
