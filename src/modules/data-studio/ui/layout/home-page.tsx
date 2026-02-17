@@ -263,6 +263,7 @@ export function HomePage({ onCloneDemo, onCreateNotebook, onUploadFiles }: HomeP
         </h2>
         <p className="text-base text-neutral-600 dark:text-neutral-200 leading-relaxed">
           Create a <code className="px-1.5 py-0.5 rounded bg-neutral-200 dark:bg-neutral-700 text-[13px] font-mono">%sql</code> cell and query files directly by path, no import step needed. Powered by DuckDB.
+          The query below materializes as view and can be accessed in other SQL cells or Python cells as dataframe.
         </p>
         <pre className="mt-4 rounded-lg bg-neutral-50 dark:bg-neutral-800/60 border border-neutral-200 dark:border-neutral-700 p-4 font-mono text-[13px] leading-relaxed overflow-x-auto">
           <code>
