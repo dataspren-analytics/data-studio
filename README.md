@@ -17,7 +17,8 @@ Python and SQL run directly in your browser via WebAssembly (Pyodide + DuckDB). 
 
 ## Features
 
-- **Notebook interface**: Create multi-cell notebooks with Python, SQL, Markdown, and Assert cells
+- **Notebook interface**: Create multi-cell notebooks with Python, SQL, and Markdown cells
+     - SQL cells materialize as views implicitly, and are available as dataframe
 - **In-browser execution**: Python and DuckDB run entirely in WebAssembly, nothing leaves your machine
 - **Data visualization**: Built-in charting (bar, line, area, scatter, pie) powered by ECharts
 - **File management**: Upload, browse, and query CSV, Parquet, JSON, and Excel files
