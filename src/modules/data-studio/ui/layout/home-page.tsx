@@ -230,7 +230,7 @@ export function HomePage({ onCloneDemo, onCreateNotebook, onUploadFiles }: HomeP
                 {cloningId === demo.id && (
                   <Loader2 size={12} className="animate-spin" />
                 )}
-                Clone
+                Clone (80MB)
               </button>
             </div>
           ))}
