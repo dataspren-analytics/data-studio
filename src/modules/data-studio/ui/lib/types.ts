@@ -158,9 +158,6 @@ export interface CellContextValue {
   /** Currently selected cell ID */
   selectedCellId: string | null;
 
-  /** ID of the most recently created cell (for auto-focus) */
-  newlyCreatedCellId: string | null;
-
   /** Set of cell IDs currently running */
   runningCellIds: Set<string>;
 

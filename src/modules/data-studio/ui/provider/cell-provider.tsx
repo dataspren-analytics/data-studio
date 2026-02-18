@@ -512,7 +512,6 @@ export function CellProvider({ children }: { children: ReactNode }) {
     () => ({
       cells,
       selectedCellId,
-      newlyCreatedCellId: null,
       runningCellIds,
       queuedCellIds,
       selectCell: setSelectedCellId,
