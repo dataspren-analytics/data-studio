@@ -1,29 +1,61 @@
-# DataSpren Data Studio
+<div align="center">
 
-Developed by [DataSpren](https://dataspren.com)
+# DataSpren Helix
 
-A browser-based data notebook for exploring, transforming, and visualizing data. No backend required.
+**Explore and visualize data, entirely in your browser. Powered by WebAssembly and DuckDB. Your data stays on your machine.**
 
-**Try it at [local.dataspren.com](https://local.dataspren.com).**
+[![MIT License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Python](https://img.shields.io/badge/Python-via_Pyodide-3776AB?logo=python&logoColor=white)](https://pyodide.org)
+[![DuckDB](https://img.shields.io/badge/DuckDB-SQL-FFF000?logo=duckdb)](https://duckdb.org)
 
-## Demo
-<img src=".github/assets/Showcase.gif" alt="Showcase" width="600">
+[Live Demo](https://local.dataspren.com) | [Getting Started](#getting-started) | [Features](#features)
 
-### Excel Editing
-<img src=".github/assets/Showcase_Excel.gif" alt="Excel Showcase" width="450">
+<img src=".github/assets/Showcase.webp" alt="DataSpren Helix notebook interface with Python, SQL, and charting" width="680">
 
+</div>
 
-Python and SQL run directly in your browser via WebAssembly (Pyodide + DuckDB). Files are stored locally using the Origin Private File System.
+---
+
+## Why Helix?
+
+Most data tools require a backend, cloud account, or sending your data somewhere. Helix runs **entirely in your browser**. Python and DuckDB execute via WebAssembly, and files are stored locally using the browser's Origin Private File System. There is no server, no upload, and nothing to install.
+
+This makes it ideal for:
+
+- **Quick data exploration**: drag in a CSV or Parquet file and start querying in seconds
+- **Sensitive data**: financial, medical, or proprietary datasets that can't leave your machine
+- **Offline work**: everything works without an internet connection after the initial load
+- **Sharing analyses**: notebooks use the standard Jupyter `.ipynb` format
+
+## Table of Contents
+
+- [Features](#features)
+- [Demo](#demo)
+- [Getting Started](#getting-started)
+- [Tech Stack](#tech-stack)
+- [Contributing](#contributing)
+- [License](#license)
 
 ## Features
 
-- **Notebook interface**: Create multi-cell notebooks with Python, SQL, and Markdown cells
-     - SQL cells materialize as views implicitly, and are available as dataframe
-- **In-browser execution**: Python and DuckDB run entirely in WebAssembly, nothing leaves your machine
-- **Data visualization**: Built-in charting (bar, line, area, scatter, pie) powered by ECharts
-- **File management**: Upload, browse, and query CSV, Parquet, JSON, and Excel files
-- **Data validation**: Assert cells for uniqueness, not-null, accepted values, and custom SQL checks
-- **Excel editing with SQL**: Query and transform Excel files directly using SQL
+| Feature | Description |
+|---|---|
+| **Notebook interface** | Multi-cell notebooks with Python, SQL, and Markdown cells. SQL cells automatically materialize as views accessible from Python. |
+| **In-browser execution** | Python (Pyodide) and DuckDB run entirely in WebAssembly. Nothing leaves your machine. |
+| **Data visualization** | Built-in charting (bar, line, area, scatter, pie) powered by ECharts. |
+| **File management** | Upload, browse, and query CSV, Parquet, JSON, and Excel files. |
+| **Data validation** | Built-in checks for uniqueness, not-null, accepted values, and custom SQL validations. |
+| **Excel editing with SQL** | Query and transform Excel files directly using SQL. |
+
+## Demo
+
+### Notebook: Python, SQL, and Charts
+
+<img src=".github/assets/Showcase.gif" alt="Notebook showcase" width="600">
+
+### Excel Editing
+
+<img src=".github/assets/Showcase_Excel.gif" alt="Excel editing showcase" width="500">
 
 ## Getting Started
 
@@ -48,52 +80,21 @@ cp .env.example .env
 docker compose up --build
 ```
 
-## Architecture
-
-Everything runs in the browser. There is no application server.
-
-### Execution
-
-Pyodide (Python compiled to WebAssembly) runs inside a dedicated **Web Worker** so the UI thread is never blocked. DuckDB runs inside the same Pyodide environment. The main thread communicates with the worker via a request/response message protocol for code execution, SQL queries, file operations, and introspection (listing tables, variables, functions).
-
-### Virtual File System
-
-The app uses a layered file system abstraction to give Pyodide and DuckDB direct access to files:
-
-```
-VirtualFS (multiplexer + Emscripten integration)
-├── /mnt/local    → OPFS Device (browser-native persistent storage)
-└── /mnt/bucket   → S3 Device (remote object storage, optional)
-```
-
-**Storage devices** implement a common `IStorageDevice` interface (read, write, delete, list, sync handles) and know nothing about Emscripten. The **VirtualFS** layer mounts them at different paths and handles all Emscripten integration so DuckDB and Python can access files using normal file paths.
-
-**OPFS Device**: Uses the browser's Origin Private File System with synchronous access handles for zero-copy byte-range reads. This means DuckDB can read Parquet files efficiently (scanning only the columns and row groups it needs) instead of loading entire files into memory. Data persists across page refreshes without any server.
-
-**S3 Device** (not yet stable): Lists remote objects lazily (metadata only) and downloads files on demand. Uses a SharedArrayBuffer + Atomics bridge to provide synchronous byte-range reads to DuckDB without blocking, with 256KB read-ahead caching for efficient Parquet scanning. Currently disabled while we stabilize the implementation.
-
-### State Management
-
-React context providers compose in layers:
-
-```
-DataStudioProvider
-  └── RuntimeProvider        (execution backend, file I/O, status)
-       └── NotebookProvider  (notebook CRUD, persistence, active notebook)
-            └── CellProvider (cell execution, outputs, selection)
-```
-
-Notebooks follow the Jupyter `.ipynb` format (nbformat v4.5) extended with DataSpren metadata for SQL view names, assert configurations, and cell types (Python, SQL, Markdown, Assert).
-
 ## Tech Stack
 
-- [Next.js](https://nextjs.org) + React 19
-- [Pyodide](https://pyodide.org): Python in WebAssembly
-- [DuckDB](https://duckdb.org): In-process SQL engine
-- [ECharts](https://echarts.apache.org): Data visualization
-- [CodeMirror](https://codemirror.net): Code editing
-- [Tailwind CSS](https://tailwindcss.com) + [Radix UI](https://www.radix-ui.com)
+| Technology | Role |
+|---|---|
+| [Next.js](https://nextjs.org) + React 19 | UI framework |
+| [Pyodide](https://pyodide.org) | Python compiled to WebAssembly |
+| [DuckDB](https://duckdb.org) | In-process analytical SQL engine |
+| [ECharts](https://echarts.apache.org) | Data visualization |
+| [CodeMirror](https://codemirror.net) | Code editor |
+| [Tailwind CSS](https://tailwindcss.com) + [Radix UI](https://www.radix-ui.com) | Styling and components |
+
+## Contributing
+
+Contributions are welcome! Feel free to open an issue or submit a pull request.
 
 ## License
 
-[MIT](LICENSE)
+[MIT](LICENSE). Copyright (c) 2026 Dataspren
