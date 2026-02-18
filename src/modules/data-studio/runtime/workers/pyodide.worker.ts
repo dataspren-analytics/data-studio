@@ -37,6 +37,7 @@ type EmscriptenFS = {
   open: (path: string, flags: string) => number;
   read: (fd: number, buffer: Uint8Array, offset: number, length: number, position: number) => number;
   close: (fd: number) => void;
+  chdir: (path: string) => void;
 };
 
 type PyodideInstance = {
@@ -754,6 +755,9 @@ self.onmessage = async (event: MessageEvent<WorkerRequest>) => {
         try {
           await initDuckDB();
           await initLocalStorage();
+          // Set working directory to /mnt/local so relative paths (e.g. "sales.csv")
+          // resolve to /mnt/local/sales.csv in DuckDB and Python.
+          pyodide!.FS.chdir(`${STORAGE_MOUNT_PATH}/${LOCAL_STORAGE_SUBPATH}`);
           postResponse({ type: "init", id: request.id, success: true });
           scheduleHandleSuspend();
           // TODO: S3 mounting temporarily disabled — not stable yet
