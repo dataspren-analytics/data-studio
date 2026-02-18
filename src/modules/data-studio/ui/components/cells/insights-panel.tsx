@@ -319,9 +319,8 @@ export function InsightsPanel({ tableData, viewName, vizConfig, vizData: persist
       setVizData(data);
       onUpdateVisualizeData?.(data);
     }).catch(() => {
-      if (cancelled) return;
-      setVizData(null);
-      onUpdateVisualizeData?.(null);
+      // Don't wipe persisted data on failure — the DuckDB view may not exist
+      // yet (e.g. after page reload before cells are re-executed).
     });
 
     return () => { cancelled = true; };
