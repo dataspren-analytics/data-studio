@@ -7,17 +7,10 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
-import { python } from "@codemirror/lang-python";
-import { sql as sqlLang } from "@codemirror/lang-sql";
-import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
-import { Prec } from "@codemirror/state";
-import { oneDark } from "@codemirror/theme-one-dark";
-import { EditorView, keymap } from "@codemirror/view";
-import { tags } from "@lezer/highlight";
-import CodeMirror from "@uiw/react-codemirror";
+import { SimpleCodeEditor } from "./simple-code-editor";
 import { Check, ChevronDown, Loader2, Play } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { cellTypeConfig, editorTheme, editorThemeDarkOverride, type SelectableCellType } from "../../lib/constants";
+import { cellTypeConfig, type SelectableCellType } from "../../lib/constants";
 import {
   extractAssertResults,
   extractTableData,
@@ -32,24 +25,10 @@ import {
   type VisualizeConfig,
 } from "../../../runtime";
 import { useIsDark } from "../../hooks/use-is-dark";
-
 import { CellToolbarActions, CellWrapper } from "./cell-chrome";
 import { CellOutput } from "./cell-output";
 import { InsightsPanel } from "./insights-panel";
 import { TestPanel } from "./test-panel";
-
-// Override oneDark's red variable color to a softer white
-const darkHighlight = HighlightStyle.define([
-  { tag: tags.variableName, color: "#e0e0e0" },
-  { tag: tags.definition(tags.variableName), color: "#e0e0e0" },
-  { tag: tags.name, color: "#e0e0e0" },
-  { tag: tags.definition(tags.name), color: "#e0e0e0" },
-  { tag: tags.keyword, color: "var(--brand)" },
-  { tag: tags.function(tags.keyword), color: "#98c379" },
-  { tag: tags.function(tags.name), color: "#98c379" },
-  { tag: tags.function(tags.variableName), color: "#98c379" },
-  { tag: tags.string, color: "#e5c07b" },
-]);
 
 export interface CodeCellProps {
   cell: CodeCellType;
@@ -99,9 +78,15 @@ export function CodeCell({
   const [editedViewName, setEditedViewName] = useState(cell.metadata.viewName || "");
   const viewNameInputRef = useRef<HTMLInputElement>(null);
 
-  // Blur editor when cell is deselected
+  const cellRef = useRef<HTMLDivElement>(null);
+
+  // Blur editor when cell is deselected — only blur elements within THIS cell
   useEffect(() => {
-    if (!isSelected && document.activeElement instanceof HTMLElement) {
+    if (
+      !isSelected &&
+      document.activeElement instanceof HTMLElement &&
+      cellRef.current?.contains(document.activeElement)
+    ) {
       document.activeElement.blur();
     }
   }, [isSelected]);
@@ -161,24 +146,42 @@ export function CodeCell({
   const cellType = getCellType(cell.source);
   const typeConfig = cellTypeConfig[cellType as SelectableCellType] ?? cellTypeConfig.python;
 
-  const handleRunCell = useCallback(
-    (view: EditorView) => {
-      if (!isRuntimeReady) return true;
-      const selection = view.state.selection.main;
-      if (!selection.empty && cellType === "sql") {
-        onRun(view.state.sliceDoc(selection.from, selection.to));
-      } else {
-        onRun();
-      }
-      return true;
-    },
-    [isRuntimeReady, cellType, onRun],
-  );
+  // Local state buffer for editor — prevents full notebook re-render on every keystroke
+  const parentSource = useMemo(() => getSourceString(cell.source), [cell.source]);
+  const [localSource, setLocalSource] = useState(parentSource);
+  const localSourceRef = useRef(parentSource);
+  const syncTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+
+  // Sync from parent when source changes externally (e.g. cell type change)
+  useEffect(() => {
+    if (parentSource !== localSourceRef.current) {
+      setLocalSource(parentSource);
+      localSourceRef.current = parentSource;
+    }
+  }, [parentSource]);
+
+  const handleSourceChange = useCallback((value: string) => {
+    setLocalSource(value);
+    localSourceRef.current = value;
+    clearTimeout(syncTimerRef.current);
+    syncTimerRef.current = setTimeout(() => onUpdate(value), 300);
+  }, [onUpdate]);
+
+  // Cleanup debounce timer on unmount
+  useEffect(() => () => clearTimeout(syncTimerRef.current), []);
+
+  const handleRunCell = useCallback(() => {
+    if (!isRuntimeReady) return;
+    // Flush any pending debounced update before running
+    clearTimeout(syncTimerRef.current);
+    onUpdate(localSourceRef.current);
+    onRun();
+  }, [isRuntimeReady, onRun, onUpdate]);
 
   return (
-    <div className="relative">
+    <div ref={cellRef} className="relative" data-cell-id={cell.id}>
       {/* Execution count — positioned outside the cell */}
-      <span className="absolute -left-12 top-1.5 w-10 text-right text-[10px] text-neutral-400 dark:text-neutral-500 select-none">
+      <span className="absolute -left-14 top-1.5 w-12 text-right text-xs text-neutral-400 dark:text-neutral-500 select-none">
         [{cell.execution_count ?? " "}]
       </span>
 
@@ -288,37 +291,17 @@ export function CodeCell({
 
       {/* Editor */}
       <div className="p-3" onClick={(e) => { e.stopPropagation(); onSelect(); }}>
-        <CodeMirror
-          value={getSourceString(cell.source)}
-          onChange={onUpdate}
-          extensions={[
-            cellType === "sql" ? sqlLang() : python(),
-            isDark ? editorThemeDarkOverride : editorTheme,
-            isDark ? oneDark : [],
-            isDark ? Prec.highest(syntaxHighlighting(darkHighlight)) : [],
-            EditorView.lineWrapping,
-            Prec.highest(
-              keymap.of([
-                { key: "Shift-Enter", run: handleRunCell },
-                { key: "Mod-Enter", run: handleRunCell },
-              ]),
-            ),
-          ]}
-          theme="light"
+        <SimpleCodeEditor
+          value={localSource}
+          onChange={handleSourceChange}
+          language={cellType === "sql" ? "sql" : "python"}
           placeholder={cellType === "sql" ? "-- Enter SQL query..." : "# Enter Python code..."}
-          basicSetup={{
-            lineNumbers: false,
-            foldGutter: false,
-            highlightActiveLine: false,
-            indentOnInput: true,
-            bracketMatching: true,
-            closeBrackets: true,
-            autocompletion: true,
+          onKeyDown={(e) => {
+            if ((e.shiftKey || e.metaKey) && e.key === "Enter") {
+              e.preventDefault();
+              handleRunCell();
+            }
           }}
-          className={cn(
-            "[&_.cm-editor]:outline-none [&_.cm-editor]:bg-transparent",
-            cellType === "sql" ? "min-h-[42px]" : "min-h-[80px]",
-          )}
         />
       </div>
 

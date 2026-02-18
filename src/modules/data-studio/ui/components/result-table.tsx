@@ -114,7 +114,8 @@ export function ResultTable({ tableData, totalRows, viewName, cellId, visibleRow
   const rowGridCols = colWidths ? colWidths.map(w => `${w}px`).join(" ") : headerGridCols;
   const effectiveVisibleRows = visibleRows ?? VISIBLE_ROWS;
   const needsScroll = tableData.length > effectiveVisibleRows;
-  const maxHeight = needsScroll ? ROW_HEIGHT * effectiveVisibleRows + 36 : undefined;
+  const HEADER_HEIGHT = 56;
+  const maxHeight = needsScroll ? ROW_HEIGHT * effectiveVisibleRows + HEADER_HEIGHT : undefined;
 
   const isLimited = totalRows !== undefined && totalRows > tableData.length;
 

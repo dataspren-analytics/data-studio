@@ -157,12 +157,12 @@ export function MarkdownCellComponent({
           </p>
         ) : (
           <div className={cn(
-            "prose prose-sm dark:prose-invert max-w-none py-1",
+            "prose prose-base dark:prose-invert max-w-none py-1",
             "prose-headings:font-semibold prose-headings:tracking-tight",
             "prose-h1:text-2xl prose-h1:mb-3 prose-h1:mt-0",
             "prose-h2:text-xl prose-h2:mb-2 prose-h2:mt-0",
             "prose-h3:text-lg prose-h3:mb-2 prose-h3:mt-0",
-            "prose-p:text-sm prose-p:leading-relaxed prose-p:my-1.5",
+            "prose-p:text-base prose-p:leading-relaxed prose-p:my-1.5",
             "prose-ul:my-1.5 prose-ol:my-1.5 prose-li:my-0.5",
             "prose-code:text-xs prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:bg-neutral-100 dark:prose-code:bg-neutral-800",
             "prose-pre:bg-neutral-100 dark:prose-pre:bg-neutral-800 prose-pre:text-xs",
