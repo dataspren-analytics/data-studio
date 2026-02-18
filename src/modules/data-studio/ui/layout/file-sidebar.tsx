@@ -973,6 +973,7 @@ base64.b64encode(content).decode('utf-8')
 
       {/* Scrollable content - Unified file tree */}
       <DndContext
+        id="file-sidebar-dnd"
         sensors={sensors}
         collisionDetection={pointerWithin}
         onDragStart={handleDragStart}

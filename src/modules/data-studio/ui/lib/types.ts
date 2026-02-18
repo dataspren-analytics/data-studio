@@ -9,6 +9,7 @@ import type {
   RegisteredFile,
   RegisteredFunction,
   TableInfo,
+  VisualizeConfig,
 } from "../../runtime";
 
 /**
@@ -205,4 +206,7 @@ export interface CellContextValue {
 
   /** Update arbitrary cell metadata */
   updateCellMetadata: (id: string, metadata: Record<string, unknown>) => void;
+
+  /** Refresh visualization data for a cell (runs DuckDB query based on viz config) */
+  refreshVizData: (id: string, configOverride?: VisualizeConfig) => Promise<void>;
 }

@@ -50,6 +50,7 @@ export interface CodeCellProps {
   onRunTests?: () => void;
   onUpdateViewName?: (newName: string) => void;
   onUpdateMetadata?: (metadata: Record<string, unknown>) => void;
+  onRefreshVizData?: (config: VisualizeConfig) => void;
 }
 
 export function CodeCell({
@@ -72,6 +73,7 @@ export function CodeCell({
   onRunTests,
   onUpdateViewName,
   onUpdateMetadata,
+  onRefreshVizData,
 }: CodeCellProps) {
   const isDark = useIsDark();
   const [isEditingViewName, setIsEditingViewName] = useState(false);
@@ -143,6 +145,12 @@ export function CodeCell({
 
   const hasOutput = cell.outputs.length > 0 || isQueued || isRunning;
   const showOutputArea = hasOutput || (isSQL && hasTests);
+
+  const errorMessage = useMemo(() => {
+    const errorOutput = cell.outputs.find((o) => o.output_type === "error");
+    if (!errorOutput || errorOutput.output_type !== "error") return null;
+    return errorOutput.evalue;
+  }, [cell.outputs]);
   const cellType = getCellType(cell.source);
   const typeConfig = cellTypeConfig[cellType as SelectableCellType] ?? cellTypeConfig.python;
 
@@ -361,6 +369,13 @@ export function CodeCell({
             </div>
           )}
 
+          {/* Error banner — visible on all tabs except Results (which shows errors via CellOutput) */}
+          {isSQL && errorMessage && activeTab !== "results" && (
+            <pre className="text-sm font-mono text-red-500 dark:text-red-400 whitespace-pre px-3 py-2 overflow-x-auto w-0 min-w-full border-b border-red-200/50 dark:border-red-900/30">
+              {errorMessage}
+            </pre>
+          )}
+
           {/* Results tab content */}
           {(!isSQL || activeTab === "results") && (
             <CellOutput
@@ -376,12 +391,11 @@ export function CodeCell({
           {isSQL && activeTab === "insights" && (
             <InsightsPanel
               tableData={tableData}
-              viewName={cell.metadata.viewName}
               vizConfig={cell.metadata.visualizeConfig as VisualizeConfig | undefined}
               vizData={(cell.metadata.visualizeData as TableData | null) ?? null}
               isDark={isDark}
               onUpdateVisualizeConfig={(config) => onUpdateMetadata?.({ visualizeConfig: config })}
-              onUpdateVisualizeData={(data) => onUpdateMetadata?.({ visualizeData: data })}
+              onRefreshVizData={onRefreshVizData}
             />
           )}
 

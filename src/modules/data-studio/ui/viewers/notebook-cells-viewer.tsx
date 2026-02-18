@@ -25,6 +25,7 @@ export function NotebookCellsViewer() {
     runCellTests,
     updateViewName,
     updateCellMetadata,
+    refreshVizData,
   } = useCells();
   const runtime = useRuntime();
 
@@ -87,6 +88,7 @@ export function NotebookCellsViewer() {
                 onRunTests={() => runCellTests(cell.id)}
                 onUpdateViewName={(newName) => updateViewName(cell.id, newName)}
                 onUpdateMetadata={(metadata) => updateCellMetadata(cell.id, metadata)}
+                onRefreshVizData={(config) => refreshVizData(cell.id, config)}
               />
             );
           } else {

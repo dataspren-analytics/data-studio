@@ -2,15 +2,15 @@
 
 import { cn } from "@/lib/utils";
 import { BarChart3, LineChart, PieChart, ScatterChart, TrendingUp } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import {
   type AggregationType,
   type TableData,
   type VisualizeChartType,
   type VisualizeConfig,
 } from "../../../runtime";
-import { useRuntime } from "../../provider/runtime-provider";
 import { InlineSelect } from "../inline-select";
+import { computeEffectiveVizConfig, computeNeedsAggregation } from "./viz-utils";
 
 // ─── EChart (lazy-loaded) ──────────────────────────────────────────────
 
@@ -69,39 +69,7 @@ const aggregationLabels: Record<AggregationType, string> = {
   max: "Max",
 };
 
-const VIZ_MAX_ROWS = 500;
-
-// ─── Helpers ───────────────────────────────────────────────────────────
-
-function hasNonUniqueX(tableData: TableData, xColumn: string): boolean {
-  const seen = new Set<string>();
-  for (const row of tableData) {
-    const key = String(row[xColumn] ?? "");
-    if (seen.has(key)) return true;
-    seen.add(key);
-  }
-  return false;
-}
-
-/** Build the DuckDB query to fetch visualization data. */
-function buildVizQuery(
-  viewName: string,
-  config: VisualizeConfig,
-  needsAggregation: boolean,
-): string {
-  const { xColumn, yColumns, aggregation } = config;
-  const quote = (col: string) => `"${col}"`;
-
-  if (needsAggregation) {
-    const agg = aggregation || "sum";
-    const sqlAgg = agg === "avg" ? "AVG" : agg.toUpperCase();
-    const yAggs = yColumns.map(col => `${sqlAgg}(${quote(col)}) as ${quote(col)}`).join(", ");
-    return `SELECT ${quote(xColumn)}, ${yAggs} FROM ${quote(viewName)} GROUP BY ${quote(xColumn)} ORDER BY ${quote(xColumn)} LIMIT ${VIZ_MAX_ROWS}`;
-  }
-
-  const cols = [xColumn, ...yColumns].map(quote).join(", ");
-  return `SELECT ${cols} FROM ${quote(viewName)} ORDER BY ${quote(xColumn)} LIMIT ${VIZ_MAX_ROWS}`;
-}
+// ─── Chart Options Builder ────────────────────────────────────────────
 
 function buildChartOptions(
   vizData: TableData,
@@ -240,7 +208,6 @@ function buildChartOptions(
     };
   }
 
-  // Bar, line, area — vizData is already aggregated if needed
   return {
     animation,
     backgroundColor: "transparent",
@@ -255,82 +222,39 @@ function buildChartOptions(
   };
 }
 
-// ─── InsightsPanel ─────────────────────────────────────────────────────
+// ─── InsightsPanel (pure renderer) ────────────────────────────────────
 
 export interface InsightsPanelProps {
   tableData: TableData | null;
-  viewName?: string;
   vizConfig: VisualizeConfig | undefined;
   vizData: TableData | null;
   isDark: boolean;
   onUpdateVisualizeConfig?: (config: VisualizeConfig) => void;
-  onUpdateVisualizeData?: (data: TableData | null) => void;
+  onRefreshVizData?: (config: VisualizeConfig) => void;
 }
 
-export function InsightsPanel({ tableData, viewName, vizConfig, vizData: persistedVizData, isDark, onUpdateVisualizeConfig, onUpdateVisualizeData }: InsightsPanelProps) {
-  const { runSQL } = useRuntime();
-  const [vizData, setVizData] = useState<TableData | null>(persistedVizData);
-
+export function InsightsPanel({ tableData, vizConfig, vizData, isDark, onUpdateVisualizeConfig, onRefreshVizData }: InsightsPanelProps) {
   const tableColumns = useMemo(() => {
     if (!tableData || tableData.length === 0) return [];
     return Object.keys(tableData[0]);
   }, [tableData]);
 
-  const numericColumns = useMemo(() => {
-    if (!tableData || tableData.length === 0) return new Set<string>();
-    const cols = new Set<string>();
-    const sample = tableData[0];
-    for (const key of Object.keys(sample)) {
-      if (typeof sample[key] === "number" || typeof sample[key] === "bigint") cols.add(key);
-    }
-    return cols;
-  }, [tableData]);
+  const effectiveVizConfig = useMemo(
+    () => computeEffectiveVizConfig(tableData, vizConfig),
+    [tableData, vizConfig],
+  );
 
-  const effectiveVizConfig = useMemo((): VisualizeConfig | null => {
-    if (!tableData || tableColumns.length === 0) return null;
-    const firstNumericCol = tableColumns.find((c) => numericColumns.has(c));
-    return {
-      chartType: vizConfig?.chartType || "bar",
-      xColumn: vizConfig?.xColumn || tableColumns[0],
-      yColumns: vizConfig?.yColumns?.length ? vizConfig.yColumns : (firstNumericCol ? [firstNumericCol] : [tableColumns[0]]),
-      aggregation: vizConfig?.aggregation,
-      groupBy: vizConfig?.groupBy
-        ? Array.isArray(vizConfig.groupBy) ? vizConfig.groupBy : [vizConfig.groupBy as unknown as string]
-        : undefined,
-    };
-  }, [vizConfig, tableColumns, numericColumns, tableData]);
+  const needsAggregation = useMemo(
+    () => computeNeedsAggregation(tableData, effectiveVizConfig),
+    [tableData, effectiveVizConfig],
+  );
 
-  const needsAggregation = useMemo(() => {
-    if (!tableData || !effectiveVizConfig) return false;
-    if (effectiveVizConfig.chartType === "scatter") return false;
-    return hasNonUniqueX(tableData, effectiveVizConfig.xColumn);
-  }, [tableData, effectiveVizConfig]);
-
-  // Fetch visualization data from DuckDB whenever config or view changes
-  useEffect(() => {
-    if (!viewName || !effectiveVizConfig) return;
-
-    const query = buildVizQuery(viewName, effectiveVizConfig, needsAggregation);
-
-    let cancelled = false;
-    runSQL(query).then(result => {
-      if (cancelled) return;
-      const data = result.tableData ?? null;
-      setVizData(data);
-      onUpdateVisualizeData?.(data);
-    }).catch(() => {
-      // Don't wipe persisted data on failure — the DuckDB view may not exist
-      // yet (e.g. after page reload before cells are re-executed).
-    });
-
-    return () => { cancelled = true; };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [viewName, effectiveVizConfig, needsAggregation, runSQL]);
+  const resolvedVizData = vizData ?? tableData;
 
   const chartOptions = useMemo(() => {
-    if (!effectiveVizConfig || !vizData || vizData.length === 0) return null;
-    return buildChartOptions(vizData, effectiveVizConfig, isDark);
-  }, [effectiveVizConfig, vizData, isDark]);
+    if (!effectiveVizConfig || !resolvedVizData || resolvedVizData.length === 0) return null;
+    return buildChartOptions(resolvedVizData, effectiveVizConfig, isDark);
+  }, [effectiveVizConfig, resolvedVizData, isDark]);
 
   if (!tableData) {
     return (
@@ -344,7 +268,7 @@ export function InsightsPanel({ tableData, viewName, vizConfig, vizData: persist
     <div className="p-3 space-y-3" onClick={(e) => e.stopPropagation()}>
       {/* Config bar */}
       <div className="flex items-center gap-2 flex-wrap">
-        {/* Chart type buttons */}
+        {/* Chart type buttons — no refresh needed, just re-renders */}
         <div className="flex items-center rounded-md border border-neutral-200 dark:border-border overflow-hidden">
           {visualizeChartTypes.map(({ type, icon: Icon, label }) => {
             const isActive = (effectiveVizConfig?.chartType || "bar") === type;
@@ -379,6 +303,7 @@ export function InsightsPanel({ tableData, viewName, vizConfig, vizData: persist
             onValueChange={(col) => {
               const updated = { ...(effectiveVizConfig || { chartType: "bar" as const, xColumn: "", yColumns: [] }), xColumn: col };
               onUpdateVisualizeConfig?.(updated);
+              onRefreshVizData?.(updated);
             }}
           />
         </div>
@@ -392,6 +317,7 @@ export function InsightsPanel({ tableData, viewName, vizConfig, vizData: persist
             onValueChange={(col) => {
               const updated = { ...(effectiveVizConfig || { chartType: "bar" as const, xColumn: "", yColumns: [] }), yColumns: [col] };
               onUpdateVisualizeConfig?.(updated);
+              onRefreshVizData?.(updated);
             }}
           />
         </div>
@@ -406,6 +332,7 @@ export function InsightsPanel({ tableData, viewName, vizConfig, vizData: persist
               onValueChange={(agg) => {
                 const updated = { ...(effectiveVizConfig || { chartType: "bar" as const, xColumn: "", yColumns: [] }), aggregation: agg as AggregationType };
                 onUpdateVisualizeConfig?.(updated);
+                onRefreshVizData?.(updated);
               }}
             />
           </div>

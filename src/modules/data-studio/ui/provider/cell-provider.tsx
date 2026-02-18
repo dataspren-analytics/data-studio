@@ -14,6 +14,7 @@ import {
   getCellType,
   getExecutableSource,
   getSourceString,
+  extractTableData,
   isCodeCell,
   createAssertOutput,
   createImageOutput,
@@ -27,9 +28,15 @@ import {
   type ErrorOutput,
   type NotebookCell,
   type StreamOutput,
+  type VisualizeConfig,
 } from "../../runtime";
 import type { CellContextValue } from "../lib/types";
 import { generateId, generateTestSQL } from "../lib/utils";
+import {
+  buildVizQuery,
+  computeEffectiveVizConfig,
+  computeNeedsAggregation,
+} from "../components/cells/viz-utils";
 import { useNotebook } from "./notebook-provider";
 import { useRuntime } from "./runtime-provider";
 
@@ -235,6 +242,39 @@ export function CellProvider({ children }: { children: ReactNode }) {
     [cells, updateCells],
   );
 
+  const refreshVizData = useCallback(
+    async (id: string, configOverride?: VisualizeConfig) => {
+      const cell = cellsRef.current.find((c) => c.id === id);
+      if (!cell || !isCodeCell(cell)) return;
+
+      const viewName = cell.metadata.viewName;
+      if (!viewName) return;
+
+      const tableData = extractTableData(cell.outputs) ?? null;
+      if (!tableData || tableData.length === 0) return;
+
+      const vizConfig = configOverride ?? (cell.metadata.visualizeConfig as VisualizeConfig | undefined);
+      const effectiveConfig = computeEffectiveVizConfig(tableData, vizConfig);
+      if (!effectiveConfig) return;
+
+      const needsAggregation = computeNeedsAggregation(tableData, effectiveConfig);
+      const query = buildVizQuery(viewName, effectiveConfig, needsAggregation);
+
+      try {
+        const result = await runtime.runSQL(query);
+        const data = result.tableData && result.tableData.length > 0 ? result.tableData : null;
+        updateCells(
+          cellsRef.current.map((c) =>
+            c.id === id ? { ...c, metadata: { ...c.metadata, visualizeData: data } } : c,
+          ),
+        );
+      } catch {
+        // Silently catch — DuckDB view may not exist (e.g. after reload)
+      }
+    },
+    [runtime, updateCells],
+  );
+
   const updateAssertConfig = useCallback(
     (id: string, assertConfig: { tests: AssertTest[] }) => {
       updateCells(
@@ -422,12 +462,18 @@ export function CellProvider({ children }: { children: ReactNode }) {
           next.delete(id);
           return next;
         });
+
+        // Refresh viz data after SQL execution if cell has insights configured
+        if (cellType === "sql" && cell.metadata.visualizeConfig) {
+          refreshVizData(id).catch(() => {});
+        }
       }
     },
     [
       updateCells,
       runtime,
       executeAssertTests,
+      refreshVizData,
     ],
   );
 
@@ -528,6 +574,7 @@ export function CellProvider({ children }: { children: ReactNode }) {
       toggleCellEnabled,
       runCellTests,
       updateCellMetadata,
+      refreshVizData,
     }),
     [
       cells,
@@ -547,6 +594,7 @@ export function CellProvider({ children }: { children: ReactNode }) {
       toggleCellEnabled,
       runCellTests,
       updateCellMetadata,
+      refreshVizData,
     ],
   );
 
