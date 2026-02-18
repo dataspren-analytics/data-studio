@@ -72,6 +72,9 @@ export function CellProvider({ children }: { children: ReactNode }) {
   const [runningCellIds, setRunningCellIds] = useState<Set<string>>(new Set());
   const [queuedCellIds, setQueuedCellIds] = useState<Set<string>>(new Set());
 
+  const cellsRef = useRef(cells);
+  cellsRef.current = cells;
+
   const nextViewNumberRef = useRef(3);
   const prevFilePathRef = useRef(activeFilePath);
 
@@ -84,6 +87,22 @@ export function CellProvider({ children }: { children: ReactNode }) {
       prevFilePathRef.current = activeFilePath;
     }
   }, [activeFilePath, cells]);
+
+  // Reset execution counts when runtime restarts
+  const prevIsReadyRef = useRef(runtime.isReady);
+  useEffect(() => {
+    if (runtime.isReady && !prevIsReadyRef.current && cells.length > 0) {
+      updateNotebookCells(
+        activeFilePath!,
+        cells.map((c) =>
+          isCodeCell(c) && c.execution_count != null
+            ? { ...c, execution_count: null }
+            : c,
+        ),
+      );
+    }
+    prevIsReadyRef.current = runtime.isReady;
+  }, [runtime.isReady, cells, activeFilePath, updateNotebookCells]);
 
   // ============================================================================
   // Cell Document Actions
@@ -116,6 +135,22 @@ export function CellProvider({ children }: { children: ReactNode }) {
         updateCells([...cells, newCell]);
       }
       setSelectedCellId(newCell.id);
+
+      // Focus the new cell's textarea via DOM polling.
+      // Radix DropdownMenu steals focus back on close with variable timing,
+      // so we keep retrying until focus actually sticks.
+      const focusTimer = setInterval(() => {
+        const el = document.querySelector(
+          `[data-cell-id="${newCell.id}"] textarea`,
+        ) as HTMLTextAreaElement | null;
+        if (!el) return;
+        el.focus();
+        if (document.activeElement === el) {
+          clearInterval(focusTimer);
+          el.setSelectionRange(el.value.length, el.value.length);
+        }
+      }, 50);
+      setTimeout(() => clearInterval(focusTimer), 3000);
     },
     [cells, updateCells],
   );
@@ -297,10 +332,10 @@ export function CellProvider({ children }: { children: ReactNode }) {
 
   const runCell = useCallback(
     async (id: string, queryOverride?: string) => {
-      const cell = cells.find((c) => c.id === id);
+      const cell = cellsRef.current.find((c) => c.id === id);
       if (!cell) return;
 
-      const execCount = getMaxExecutionCount(cells) + 1;
+      const execCount = getMaxExecutionCount(cellsRef.current) + 1;
       setRunningCellIds((prev) => new Set(prev).add(id));
       setQueuedCellIds((prev) => {
         const next = new Set(prev);
@@ -308,82 +343,88 @@ export function CellProvider({ children }: { children: ReactNode }) {
         return next;
       });
 
-      const cellsWithCleared = cells.map((c) =>
+      // Clear outputs for this cell (read latest cells via ref)
+      updateCells(cellsRef.current.map((c) =>
         c.id === id ? { ...c, outputs: [], execution_count: execCount } : c,
-      );
-      updateCells(cellsWithCleared);
+      ));
 
       await new Promise((resolve) => setTimeout(resolve, 50));
 
       const outputs: CellOutput[] = [];
       const cellType = getCellType(cell.source);
 
-      const startTime = Date.now();
-
-      if (cellType === "python") {
-        const result = await runtime.runPython(getSourceString(cell.source));
-        if (result.error) {
-          outputs.push({
-            output_type: "error",
-            ename: "ExecutionError",
-            evalue: result.error,
-            traceback: [result.error],
-          } as ErrorOutput);
-        } else {
-          if (result.output)
+      try {
+        if (cellType === "python") {
+          const result = await runtime.runPython(getSourceString(cell.source));
+          if (result.error) {
             outputs.push({
-              output_type: "stream",
-              name: "stdout",
-              text: result.output,
-            } as StreamOutput);
-          if (result.tableData) outputs.push(createTableOutput(result.tableData, execCount, result.totalRows));
-          if (result.imageData) outputs.push(createImageOutput(result.imageData, execCount));
-        }
-        runtime.refreshFunctions();
-        runtime.refreshVariables();
-      } else if (cellType === "sql") {
-        const queryToRun = queryOverride || getExecutableSource(cell.source);
-        const result = await runtime.runSQL(
-          queryToRun,
-          queryOverride ? undefined : cell.metadata.viewName,
-        );
-        if (result.error) {
-          outputs.push({
-            output_type: "error",
-            ename: "SQLError",
-            evalue: result.error,
-            traceback: [result.error],
-          } as ErrorOutput);
-        } else {
-          if (result.output)
+              output_type: "error",
+              ename: "ExecutionError",
+              evalue: result.error,
+              traceback: [result.error],
+            } as ErrorOutput);
+          } else {
+            if (result.output)
+              outputs.push({
+                output_type: "stream",
+                name: "stdout",
+                text: result.output,
+              } as StreamOutput);
+            if (result.tableData) outputs.push(createTableOutput(result.tableData, execCount, result.totalRows));
+            if (result.imageData) outputs.push(createImageOutput(result.imageData, execCount));
+          }
+          runtime.refreshFunctions();
+          runtime.refreshVariables();
+        } else if (cellType === "sql") {
+          const queryToRun = queryOverride || getExecutableSource(cell.source);
+          const result = await runtime.runSQL(
+            queryToRun,
+            queryOverride ? undefined : cell.metadata.viewName,
+          );
+          if (result.error) {
             outputs.push({
-              output_type: "stream",
-              name: "stdout",
-              text: result.output,
-            } as StreamOutput);
-          if (result.tableData) outputs.push(createTableOutput(result.tableData, execCount, result.totalRows));
-        }
-        runtime.refreshTables();
-        runtime.refreshVariables();
+              output_type: "error",
+              ename: "SQLError",
+              evalue: result.error,
+              traceback: [result.error],
+            } as ErrorOutput);
+          } else {
+            if (result.output)
+              outputs.push({
+                output_type: "stream",
+                name: "stdout",
+                text: result.output,
+              } as StreamOutput);
+            if (result.tableData) outputs.push(createTableOutput(result.tableData, execCount, result.totalRows));
+          }
+          runtime.refreshTables();
+          runtime.refreshVariables();
 
-        // Run embedded tests if the SQL cell has assertConfig
-        const embeddedTests = cell.metadata.assertConfig?.tests;
-        if (embeddedTests && embeddedTests.length > 0) {
-          const assertResults = await executeAssertTests(embeddedTests);
-          outputs.push(createAssertOutput(assertResults));
+          // Run embedded tests if the SQL cell has assertConfig
+          const embeddedTests = cell.metadata.assertConfig?.tests;
+          if (embeddedTests && embeddedTests.length > 0) {
+            const assertResults = await executeAssertTests(embeddedTests);
+            outputs.push(createAssertOutput(assertResults));
+          }
         }
+      } catch (err) {
+        outputs.push({
+          output_type: "error",
+          ename: "ExecutionError",
+          evalue: err instanceof Error ? err.message : String(err),
+          traceback: [err instanceof Error ? err.message : String(err)],
+        } as ErrorOutput);
+      } finally {
+        // Always update outputs and clear running state — use latest cells via ref
+        updateCells(cellsRef.current.map((c) => (c.id === id ? { ...c, outputs } : c)));
+        setRunningCellIds((prev) => {
+          const next = new Set(prev);
+          next.delete(id);
+          return next;
+        });
       }
-
-      updateCells(cellsWithCleared.map((c) => (c.id === id ? { ...c, outputs } : c)));
-      setRunningCellIds((prev) => {
-        const next = new Set(prev);
-        next.delete(id);
-        return next;
-      });
-
     },
     [
-      cells,
       updateCells,
       runtime,
       executeAssertTests,
@@ -452,8 +493,8 @@ export function CellProvider({ children }: { children: ReactNode }) {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Enter" && (e.shiftKey || e.metaKey) && selectedCellId) {
         const target = e.target as HTMLElement;
-        const isInCodeMirror = target.closest(".cm-editor");
-        if (!isInCodeMirror) {
+        const isInEditor = target instanceof HTMLTextAreaElement;
+        if (!isInEditor) {
           e.preventDefault();
           runCellAndAdvance(selectedCellId);
         }

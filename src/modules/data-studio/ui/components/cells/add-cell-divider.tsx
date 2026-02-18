@@ -21,7 +21,7 @@ export function AddCellDivider({ onAddCell }: AddCellDividerProps) {
 
   return (
     <div
-      className="relative h-6 -my-3 flex items-center justify-center"
+      className="relative h-0 flex items-center justify-center before:absolute before:inset-x-0 before:-top-4 before:-bottom-4 before:content-['']"
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => !isMenuOpen && setIsHovered(false)}
     >
@@ -51,7 +51,11 @@ export function AddCellDivider({ onAddCell }: AddCellDividerProps) {
             <Plus size={14} />
           </button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="center" className="w-[140px]">
+        <DropdownMenuContent
+          align="center"
+          className="w-[140px]"
+          onCloseAutoFocus={(e) => e.preventDefault()}
+        >
           {(Object.keys(cellTypeConfig) as SelectableCellType[]).map((type) => {
             const config = cellTypeConfig[type];
             const Icon = config.icon;
