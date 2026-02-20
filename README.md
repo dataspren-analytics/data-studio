@@ -1,6 +1,6 @@
 <div align="center">
 
-# DataSpren DataStudio
+# DataStudio
 
 **Explore and visualize data, entirely in your browser. Powered by WebAssembly and DuckDB. Your data stays on your machine.**
 
