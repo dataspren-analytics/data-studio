@@ -17,7 +17,7 @@
 ## Roadmap
 
 - [ ] **External Storage** - Mount S3 buckets
-- [ ] **AI UDFs** - AI SQL UDFs (embed(s), cosine_sim(u, v), llm(s1, prompt))
+- [ ] **AI UDFs** - AI SQL UDFs embed(col), cosine_sim(u, v), llm(model, prompt, col)
 - [ ] **Ad hoc SQL** - .sql file support with executor + viewer
 
 Have a feature request? [Open an issue](https://github.com/dataspren-analytics/datastudio/issues) and let us know!
