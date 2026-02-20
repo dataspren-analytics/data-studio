@@ -165,6 +165,30 @@ export const MonacoCodeEditor = forwardRef<MonacoEditorHandle, MonacoCodeEditorP
 
       monaco.editor.setTheme(isDark ? "custom-dark" : "custom-light");
 
+      // Style %sql / %%sql magic commands like comments
+      const sqlMagicStyleId = "monaco-sql-magic-style";
+      if (!document.getElementById(sqlMagicStyleId)) {
+        const style = document.createElement("style");
+        style.id = sqlMagicStyleId;
+        style.textContent = `.sql-magic-decoration { color: #6a737d !important; }`;
+        document.head.appendChild(style);
+      }
+
+      const decorationCollection = editor.createDecorationsCollection([]);
+      const updateSqlMagicDecorations = () => {
+        const model = editor.getModel();
+        if (!model) return;
+        const matches = model.findMatches("%%?sql\\b", false, true, false, null, false);
+        decorationCollection.set(
+          matches.map((match) => ({
+            range: match.range,
+            options: { inlineClassName: "sql-magic-decoration" },
+          }))
+        );
+      };
+      updateSqlMagicDecorations();
+      editor.onDidChangeModelContent(() => updateSqlMagicDecorations());
+
       if (autoFocusRef.current) {
         editor.focus();
       }
@@ -190,7 +214,7 @@ export const MonacoCodeEditor = forwardRef<MonacoEditorHandle, MonacoCodeEditorP
         minimap: { enabled: false },
         fontSize: 14,
         lineHeight: 21, // 14px * 1.5
-        fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+        fontFamily: "Menlo, ui-monospace, SFMono-Regular, Monaco, Consolas, monospace",
         lineNumbers: showLineNumbers ? "on" : "off",
         scrollBeyondLastLine: false,
         automaticLayout: true,
