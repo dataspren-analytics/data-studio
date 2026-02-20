@@ -25,9 +25,10 @@ interface ResultTableProps {
   cellId: string;
   visibleRows?: number;
   onChangeVisibleRows?: (rows: number) => void;
+  fillHeight?: boolean;
 }
 
-export function ResultTable({ tableData, totalRows, viewName, cellId, visibleRows, onChangeVisibleRows }: ResultTableProps) {
+export function ResultTable({ tableData, totalRows, viewName, cellId, visibleRows, onChangeVisibleRows, fillHeight }: ResultTableProps) {
   const [sorting, setSorting] = useState<SortingState>([]);
   const [colWidths, setColWidths] = useState<number[] | null>(null);
   const tableContainerRef = useRef<HTMLDivElement>(null);
@@ -121,7 +122,7 @@ export function ResultTable({ tableData, totalRows, viewName, cellId, visibleRow
 
   return (
     <>
-      <div ref={tableContainerRef} className="overflow-auto text-[13px]" style={{ maxHeight }}>
+      <div ref={tableContainerRef} className="overflow-auto text-[13px]" style={fillHeight ? { height: "100%" } : { maxHeight }}>
         {/* Header row - sticky */}
         <div
           ref={headerRef}

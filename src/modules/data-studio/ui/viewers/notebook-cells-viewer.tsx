@@ -17,7 +17,6 @@ export function NotebookCellsViewer() {
     updateCell,
     deleteCell,
     runCellAndAdvance,
-    runCell,
     changeCellType,
     moveCellUp,
     moveCellDown,
@@ -28,14 +27,13 @@ export function NotebookCellsViewer() {
     refreshVizData,
   } = useCells();
   const runtime = useRuntime();
-
   return (
     <div
       className="flex-1 min-w-0 overflow-y-auto bg-stone-50 dark:bg-background"
       onClick={() => selectCell(null)}
       onMouseDown={() => {
-        // Blur CodeMirror immediately on mousedown in the background area
-        // Cells stop mousedown propagation so this only fires for background clicks
+        // Blur editor on mousedown in the background area
+        // Cells stop propagation so this only fires for background clicks
         if (document.activeElement instanceof HTMLElement) {
           document.activeElement.blur();
         }

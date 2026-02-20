@@ -7,7 +7,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
-import { SimpleCodeEditor } from "./simple-code-editor";
+import { CodeEditor, type MonacoEditorHandle } from "./code-editor";
 import { Check, ChevronDown, Loader2, Play } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { cellTypeConfig, type SelectableCellType } from "../../lib/constants";
@@ -81,11 +81,13 @@ export function CodeCell({
   const viewNameInputRef = useRef<HTMLInputElement>(null);
 
   const cellRef = useRef<HTMLDivElement>(null);
+  const editorRef = useRef<MonacoEditorHandle>(null);
 
-  // Blur editor when cell is deselected — only blur elements within THIS cell
+  // Focus editor when cell becomes selected, blur when deselected
   useEffect(() => {
-    if (
-      !isSelected &&
+    if (isSelected) {
+      editorRef.current?.focus();
+    } else if (
       document.activeElement instanceof HTMLElement &&
       cellRef.current?.contains(document.activeElement)
     ) {
@@ -179,12 +181,32 @@ export function CodeCell({
   useEffect(() => () => clearTimeout(syncTimerRef.current), []);
 
   const handleRunCell = useCallback(() => {
-    if (!isRuntimeReady) return;
+    if (!isRuntimeReady || !editorRef.current) return;
+
     // Flush any pending debounced update before running
     clearTimeout(syncTimerRef.current);
-    onUpdate(localSourceRef.current);
-    onRun();
-  }, [isRuntimeReady, onRun, onUpdate]);
+
+    const selection = editorRef.current.getSelection();
+    const content = editorRef.current.getContent();
+
+    if (selection && cellType === "sql") {
+      // For SQL cells with selected text, run only the selection
+      onRun(selection);
+    } else {
+      // Update cell source with current editor content, then run
+      onUpdate(content);
+      onRun();
+    }
+  }, [isRuntimeReady, onRun, onUpdate, cellType]);
+
+  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    // Cmd+Enter or Shift+Enter to run
+    if (e.key === "Enter" && (e.metaKey || e.ctrlKey || e.shiftKey)) {
+      e.preventDefault();
+      e.stopPropagation();
+      handleRunCell();
+    }
+  }, [handleRunCell]);
 
   return (
     <div ref={cellRef} className="relative" data-cell-id={cell.id}>
@@ -298,18 +320,18 @@ export function CodeCell({
       </div>
 
       {/* Editor */}
-      <div className="p-3" onClick={(e) => { e.stopPropagation(); onSelect(); }}>
-        <SimpleCodeEditor
+      <div
+        className="p-3"
+        onClick={(e) => { e.stopPropagation(); onSelect(); }}
+        onKeyDown={handleKeyDown}
+      >
+        <CodeEditor
+          ref={editorRef}
           value={localSource}
           onChange={handleSourceChange}
           language={cellType === "sql" ? "sql" : "python"}
           placeholder={cellType === "sql" ? "-- Enter SQL query..." : "# Enter Python code..."}
-          onKeyDown={(e) => {
-            if ((e.shiftKey || e.metaKey) && e.key === "Enter") {
-              e.preventDefault();
-              handleRunCell();
-            }
-          }}
+          autoFocus={isSelected}
         />
       </div>
 

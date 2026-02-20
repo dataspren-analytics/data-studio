@@ -8,6 +8,7 @@ import { ExcelFileViewer } from "../viewers/excel-file-viewer";
 import { JsonFileViewer } from "../viewers/json-file-viewer";
 import { NotebookCellsViewer } from "../viewers/notebook-cells-viewer";
 import { ParquetFileViewer } from "../viewers/parquet-file-viewer";
+import { SqlFileViewer } from "../viewers/sql-file-viewer";
 import { TextFileViewer } from "../viewers/text-file-viewer";
 import { useNotebook, useRuntime } from "../provider";
 export function ContentArea() {
@@ -92,6 +93,8 @@ function ContentViewer({ filePath }: ContentViewerProps) {
     case ".xlsx":
     case ".xls":
       return <ExcelFileViewer filePath={filePath} runtime={runtime} />;
+    case ".sql":
+      return <SqlFileViewer filePath={filePath} runtime={runtime} />;
     case ".md":
     case ".txt":
     case "none":

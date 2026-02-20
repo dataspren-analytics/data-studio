@@ -21,9 +21,12 @@ import type {
 import { getRelativePath } from "../../runtime/notebook-utils";
 import { listOPFSFiles } from "../../runtime/opfs-list";
 import type { RuntimeContextValue } from "../lib/types";
+import { Button } from "@/components/ui/button";
 
 const RuntimeContext = createContext<RuntimeContextValue | null>(null);
 const ExecutionBackendContext = createContext<IExecutionBackend | null>(null);
+
+const TAB_LOCK_NAME = "data-studio-runtime";
 
 interface RuntimeProviderProps {
   execution: IExecutionBackend;
@@ -32,6 +35,44 @@ interface RuntimeProviderProps {
 }
 
 export function RuntimeProvider({ execution, autoInit = true, children }: RuntimeProviderProps) {
+  const [tabBlocked, setTabBlocked] = useState(false);
+
+  // Acquire an exclusive Web Lock so only one tab can use the OPFS-backed
+  // runtime at a time.  If another tab already holds the lock we show a
+  // blocking dialog instead of initialising (which would crash on
+  // createSyncAccessHandle).
+  useEffect(() => {
+    let released = false;
+
+    navigator.locks.request(
+      TAB_LOCK_NAME,
+      { ifAvailable: true },
+      (lock) => {
+        if (released) return;
+        if (!lock) {
+          // Another tab holds the lock.
+          setTabBlocked(true);
+          return;
+        }
+        // Lock acquired – hold it for the lifetime of this tab by returning
+        // a promise that only resolves on cleanup.
+        setTabBlocked(false);
+        return new Promise<void>((resolve) => {
+          // Store resolve so we can release the lock on unmount.
+          releaseRef.current = resolve;
+        });
+      },
+    );
+
+    return () => {
+      released = true;
+      releaseRef.current?.();
+      releaseRef.current = null;
+    };
+  }, []);
+
+  const releaseRef = useRef<(() => void) | null>(null);
+
   const [executionStatus, setExecutionStatus] = useState<ExecutionStatus>(() => execution.status);
   const [dataFiles, setDataFiles] = useState<import("../../runtime").FileInfo[]>([]);
   const [tables, setTables] = useState<TableInfo[]>([]);
@@ -313,6 +354,24 @@ export function RuntimeProvider({ execution, autoInit = true, children }: Runtim
       refreshTables, refreshFunctions, refreshVariables, refreshFiles, handleReset,
     ],
   );
+
+  if (tabBlocked) {
+    return (
+      <div className="flex h-screen w-screen items-center justify-center bg-background">
+        <div className="flex max-w-sm flex-col items-center gap-4 text-center">
+          <p className="text-xl font-semibold tracking-tight">DataStudio</p>
+          <p className="text-sm text-muted-foreground">
+            DataStudio uses the Origin Private File System for local data
+            processing, which only supports a single active session. Please
+            close the other tab, then click retry.
+          </p>
+          <Button variant="outline" size="sm" className="cursor-pointer" onClick={() => window.location.reload()}>
+            Retry
+          </Button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <ExecutionBackendContext.Provider value={execution}>

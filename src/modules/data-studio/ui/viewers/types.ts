@@ -7,7 +7,7 @@ export interface FileViewerProps {
 
 export type FileViewerComponent = React.ComponentType<FileViewerProps>;
 
-export type FileExtension = ".csv" | ".ipynb" | ".json" | ".parquet" | ".xlsx" | ".xls" | ".md" | ".txt" | "none";
+export type FileExtension = ".csv" | ".ipynb" | ".json" | ".parquet" | ".xlsx" | ".xls" | ".md" | ".txt" | ".sql" | "none";
 
 export function getFileExtension(filePath: string): FileExtension | null {
   if (filePath.endsWith(".csv")) return ".csv";
@@ -18,6 +18,7 @@ export function getFileExtension(filePath: string): FileExtension | null {
   if (filePath.endsWith(".xls")) return ".xls";
   if (filePath.endsWith(".md")) return ".md";
   if (filePath.endsWith(".txt")) return ".txt";
+  if (filePath.endsWith(".sql")) return ".sql";
   
   const fileName = filePath.split("/").pop() || "";
   if (!fileName.includes(".")) return "none";

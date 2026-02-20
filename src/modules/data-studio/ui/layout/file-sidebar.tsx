@@ -61,8 +61,9 @@ import {
   Share,
   Trash2,
 } from "lucide-react";
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { FileInfo, NotebookCell } from "../../runtime";
+import { ResizablePanel } from "../components/resizable-panel";
 import type { NotebookEntry } from "../lib/types";
 import { formatFileSize } from "../lib/utils";
 import { useNotebook, useRuntime } from "../provider";
@@ -192,6 +193,7 @@ function FileIconForName({ name, size, className }: { name: string; size: number
     case "json": icon = <CarbonJson size={size} />; break;
     case "txt": icon = <CarbonTxt size={size} />; break;
     case "md": icon = <CarbonDocument size={size} />; break;
+    case "sql": icon = <CarbonDocumentBlank size={size} />; break;
     default: icon = <CarbonDocumentBlank size={size} />; break;
   }
   return <span className={className}>{icon}</span>;
@@ -772,7 +774,7 @@ base64.b64encode(content).decode('utf-8')
       const files = Array.from(e.dataTransfer.files).filter((file) => {
         const ext = file.name.split(".").pop()?.toLowerCase();
         const hasExtension = file.name.includes(".");
-        return ext === "csv" || ext === "parquet" || ext === "json" || ext === "xlsx" || ext === "xls" || ext === "md" || ext === "txt" || ext === "ipynb" || !hasExtension;
+        return ext === "csv" || ext === "parquet" || ext === "json" || ext === "xlsx" || ext === "xls" || ext === "md" || ext === "txt" || ext === "sql" || ext === "ipynb" || !hasExtension;
       });
 
       for (const file of files) {
@@ -805,7 +807,17 @@ base64.b64encode(content).decode('utf-8')
       const blob = new Blob([""], { type: "text/plain" });
       const file = new File([blob], fileName, { type: "text/plain" });
       await onWriteFile(file, "/mnt/local");
-      // Open the newly created file
+      onOpenFile(`/mnt/local/${fileName}`);
+    }
+  }, [onWriteFile, onOpenFile]);
+
+  const handleCreateSqlFile = useCallback(async () => {
+    const name = prompt("Enter SQL file name:", "untitled.sql");
+    if (name && name.trim()) {
+      const fileName = name.trim().endsWith(".sql") ? name.trim() : `${name.trim()}.sql`;
+      const blob = new Blob([""], { type: "text/plain" });
+      const file = new File([blob], fileName, { type: "text/plain" });
+      await onWriteFile(file, "/mnt/local");
       onOpenFile(`/mnt/local/${fileName}`);
     }
   }, [onWriteFile, onOpenFile]);
@@ -825,36 +837,6 @@ base64.b64encode(content).decode('utf-8')
 
   // ---- Resize handle logic ----
   const [sidebarWidth, setSidebarWidth] = useState(224); // 224px = w-56
-  const [isResizingActive, setIsResizingActive] = useState(false);
-  const isResizing = useRef(false);
-
-  const handleResizePointerDown = useCallback((e: ReactPointerEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    isResizing.current = true;
-    setIsResizingActive(true);
-    const startX = e.clientX;
-    const startWidth = sidebarWidth;
-
-    const onPointerMove = (ev: globalThis.PointerEvent) => {
-      const delta = ev.clientX - startX;
-      const newWidth = Math.max(140, Math.min(startWidth + delta, 600));
-      setSidebarWidth(newWidth);
-    };
-
-    const onPointerUp = () => {
-      isResizing.current = false;
-      setIsResizingActive(false);
-      document.removeEventListener("pointermove", onPointerMove);
-      document.removeEventListener("pointerup", onPointerUp);
-      document.body.style.cursor = "";
-      document.body.style.userSelect = "";
-    };
-
-    document.addEventListener("pointermove", onPointerMove);
-    document.addEventListener("pointerup", onPointerUp);
-    document.body.style.cursor = "col-resize";
-    document.body.style.userSelect = "none";
-  }, [sidebarWidth]);
 
   if (collapsed) {
     return (
@@ -902,19 +884,18 @@ base64.b64encode(content).decode('utf-8')
   }
 
   return (
-    <div
-      ref={sidebarRef}
-      className={cn(
-        "relative shrink-0 border-r border-neutral-200 dark:border-sidebar-border bg-neutral-50/30 dark:bg-sidebar flex flex-col overflow-hidden select-none",
+    <ResizablePanel
+      direction="horizontal"
+      size={sidebarWidth}
+      onSizeChange={setSidebarWidth}
+      minSize={140}
+      maxSize={600}
+      contentRef={sidebarRef}
+      contentClassName={cn(
+        "border-r border-neutral-200 dark:border-sidebar-border bg-neutral-50/30 dark:bg-sidebar flex flex-col select-none",
         isSidebarDragOver && "ring-2 ring-inset ring-blue-400/50"
       )}
-      style={{ width: sidebarWidth }}
     >
-      {/* Resize handle */}
-      <div
-        onPointerDown={handleResizePointerDown}
-        className={cn("absolute top-0 right-0 w-1 h-full cursor-col-resize z-10 transition-colors", isResizingActive ? "bg-blue-500/50" : "hover:bg-blue-500/50")}
-      />
       {/* Home button */}
       {onShowHome && (
         <button
@@ -958,6 +939,10 @@ base64.b64encode(content).decode('utf-8')
               <DropdownMenuItem onClick={() => handleCreateTextFile("txt")} className="text-xs py-1.5">
                 <CarbonTxt size={12} />
                 <span>Text file (.txt)</span>
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={handleCreateSqlFile} className="text-xs py-1.5">
+                <CarbonDocumentBlank size={12} />
+                <span>SQL file (.sql)</span>
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -1054,7 +1039,7 @@ base64.b64encode(content).decode('utf-8')
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </div>
+    </ResizablePanel>
   );
 }
 
