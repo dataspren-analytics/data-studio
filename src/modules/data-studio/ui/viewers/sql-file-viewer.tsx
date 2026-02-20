@@ -5,7 +5,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { TableData } from "../../runtime";
 import { ResizablePanel } from "../components/resizable-panel";
 import { ResultTable } from "../components/result-table";
-import { SimpleCodeEditor } from "../components/cells/simple-code-editor";
+import { CodeEditor, type MonacoEditorHandle } from "../components/cells/code-editor";
 import type { FileViewerProps } from "./types";
 
 type FileLoadState =
@@ -46,7 +46,8 @@ const SqlFileViewerInner = memo(function SqlFileViewerInner({
   const [queryState, setQueryState] = useState<QueryState>({ status: "idle" });
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const contentRef = useRef("");
-  const [resultsHeight, setResultsHeight] = useState(300);
+  const [resultsHeight, setResultsHeight] = useState(450);
+  const editorRef = useRef<MonacoEditorHandle>(null);
 
   // Load file content
   useEffect(() => {
@@ -106,8 +107,18 @@ const SqlFileViewerInner = memo(function SqlFileViewerInner({
   }, []);
 
   const handleRun = useCallback(async () => {
-    const sqlContent = contentRef.current.trim();
+    if (!editorRef.current) return;
+
+    const selection = editorRef.current.getSelection();
+    const fullContent = editorRef.current.getContent();
+    const sqlContent = (selection || fullContent).trim();
+
     if (!sqlContent) return;
+
+    // Update contentRef with current editor content if not selection
+    if (!selection) {
+      contentRef.current = fullContent;
+    }
 
     setQueryState({ status: "running" });
 
@@ -140,19 +151,14 @@ const SqlFileViewerInner = memo(function SqlFileViewerInner({
     }
   }, [runtimeActions]);
 
-  // Use a ref so the keydown handler always calls the latest handleRun
-  const handleRunRef = useRef(handleRun);
-  handleRunRef.current = handleRun;
-
-  const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent<HTMLDivElement | HTMLTextAreaElement>) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
-        e.preventDefault();
-        handleRunRef.current();
-      }
-    },
-    [],
-  );
+  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    // Cmd+Enter or Shift+Enter to run
+    if (e.key === "Enter" && (e.metaKey || e.ctrlKey || e.shiftKey)) {
+      e.preventDefault();
+      e.stopPropagation();
+      handleRun();
+    }
+  }, [handleRun]);
 
   if (fileState.status === "loading") {
     return (
@@ -180,31 +186,32 @@ const SqlFileViewerInner = memo(function SqlFileViewerInner({
         <button
           onClick={handleRun}
           disabled={queryState.status === "running"}
-          className="flex items-center gap-1.5 px-3 py-1 text-xs font-medium rounded-md bg-brand text-white hover:bg-brand/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          className="p-1 text-neutral-400 hover:text-emerald-600 hover:bg-emerald-50 dark:text-neutral-500 dark:hover:text-emerald-400 dark:hover:bg-emerald-950 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          title={queryState.status === "running" ? "Running..." : "Run query (⇧+Enter or ⌘+Enter)"}
         >
           {queryState.status === "running" ? (
-            <Loader2 size={12} className="animate-spin" />
+            <Loader2 size={14} className="animate-spin" />
           ) : (
-            <Play size={12} />
+            <Play size={14} />
           )}
-          <span>Run</span>
         </button>
         <span className="text-xs text-neutral-400 dark:text-neutral-500">
-          {navigator.platform?.includes("Mac") ? "\u2318" : "Ctrl"}+Enter
+          {navigator.platform?.includes("Mac") ? "⇧ + Enter" : "Ctrl + Enter"}
         </span>
       </div>
 
       {/* Editor */}
-      <div className="flex-1 overflow-auto min-h-[100px]">
-        <div className="p-4">
-          <SimpleCodeEditor
-            value={content}
-            onChange={handleChange}
-            language="sql"
-            placeholder="-- Write your SQL query here..."
-            onKeyDown={handleKeyDown}
-          />
-        </div>
+      <div className="flex-1 overflow-hidden" onKeyDown={handleKeyDown}>
+        <CodeEditor
+          ref={editorRef}
+          value={content}
+          onChange={handleChange}
+          language="sql"
+          placeholder="-- Write your SQL query here..."
+          enableScrolling={true}
+          showLineNumbers={true}
+          resetKey={filePath}
+        />
       </div>
 
       {/* Results panel */}

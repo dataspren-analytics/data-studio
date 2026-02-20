@@ -601,22 +601,20 @@ export function createOPFSDevice(): IStorageDevice {
 
     async openSyncHandle(relativePath: string): Promise<ISyncFileHandle | null> {
       ensureInitialized();
-      console.log(LOG_PREFIX, `Opening sync handle for: ${relativePath}`);
 
-      // Close existing handle if any
+      // Reuse existing handle if one is already open. Closing an in-use
+      // handle causes a fatal Pyodide crash when DuckDB tries to read
+      // through it (InvalidStateError on FileSystemSyncAccessHandle).
       const existing = openHandles.get(relativePath);
       if (existing) {
-        console.log(LOG_PREFIX, `Closing existing handle for: ${relativePath}`);
-        existing.close();
-        openHandles.delete(relativePath);
+        return new OPFSSyncHandle(existing);
       }
 
       try {
         const handle = await getFileHandle(relativePath);
-        console.log(LOG_PREFIX, `Got file handle for: ${relativePath}`);
         const accessHandle = await handle.createSyncAccessHandle();
         const size = accessHandle.getSize();
-        console.log(LOG_PREFIX, `Created sync access handle for: ${relativePath} (size=${size} bytes)`);
+        console.log(LOG_PREFIX, `Opened sync handle for: ${relativePath} (size=${size} bytes)`);
         openHandles.set(relativePath, accessHandle);
         return new OPFSSyncHandle(accessHandle);
       } catch (e) {

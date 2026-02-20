@@ -24,6 +24,11 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className={`${geistSans.variable} ${geistMono.variable} antialiased bg-white`}>
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `document.addEventListener('keydown',function(e){if((e.metaKey||e.ctrlKey)&&e.key==='s'){e.preventDefault()}})`,
+          }}
+        />
         {children}
       </body>
     </html>

@@ -1,93 +1,19 @@
 "use client";
 
-import { markdown } from "@codemirror/lang-markdown";
-import { oneDark } from "@codemirror/theme-one-dark";
-import { EditorView } from "@codemirror/view";
-import CodeMirror from "@uiw/react-codemirror";
 import { Loader2 } from "lucide-react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { CodeEditor, type EditorLanguage } from "../components/cells/code-editor";
 import type { FileViewerProps } from "./types";
-
-const textEditorTheme = EditorView.theme({
-  "&": {
-    backgroundColor: "transparent",
-    fontSize: "14px",
-  },
-  "&.cm-focused": {
-    outline: "none",
-  },
-  ".cm-content": {
-    caretColor: "#0a0a0a",
-    fontFamily: "var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
-    fontVariantLigatures: "none",
-  },
-  ".cm-cursor": {
-    borderLeftColor: "#0a0a0a",
-  },
-  "&.cm-focused .cm-selectionBackground, .cm-selectionBackground": {
-    backgroundColor: "#fef6f0",
-  },
-  ".cm-activeLine": {
-    backgroundColor: "rgba(0, 0, 0, 0.03)",
-  },
-  ".cm-gutters": {
-    backgroundColor: "transparent",
-    borderRight: "1px solid #e5e5e5",
-    color: "#a3a3a3",
-  },
-  ".cm-lineNumbers .cm-gutterElement": {
-    paddingLeft: "8px",
-    paddingRight: "8px",
-  },
-  ".cm-line": {
-    paddingLeft: "4px",
-    paddingRight: "0",
-    paddingTop: "0",
-    paddingBottom: "0",
-  },
-});
-
-const textEditorThemeDark = EditorView.theme({
-  "&": {
-    backgroundColor: "transparent !important",
-    fontSize: "14px",
-  },
-  "&.cm-focused": {
-    outline: "none",
-  },
-  ".cm-content": {
-    fontFamily: "var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
-    fontVariantLigatures: "none",
-  },
-  ".cm-activeLine": {
-    backgroundColor: "rgba(255, 255, 255, 0.03)",
-  },
-  ".cm-gutters": {
-    backgroundColor: "transparent",
-    borderRight: "1px solid #404040",
-    color: "#6b7280",
-  },
-  ".cm-lineNumbers .cm-gutterElement": {
-    paddingLeft: "8px",
-    paddingRight: "8px",
-  },
-  ".cm-line": {
-    paddingLeft: "4px",
-    paddingRight: "0",
-    paddingTop: "0",
-    paddingBottom: "0",
-  },
-}, { dark: true });
 
 type LoadingState =
   | { status: "loading" }
   | { status: "success"; content: string }
   | { status: "error"; message: string };
 
-function getFileExtension(filePath: string): string | null {
-  const fileName = filePath.split("/").pop() || "";
-  if (!fileName.includes(".")) return null;
-  return fileName.split(".").pop()?.toLowerCase() || null;
+function getEditorLanguage(filePath: string): EditorLanguage {
+  const ext = filePath.split(".").pop()?.toLowerCase();
+  if (ext === "md") return "markdown";
+  return "plaintext";
 }
 
 interface TextRuntimeActions {
@@ -100,22 +26,13 @@ interface TextFileViewerInnerProps {
   runtimeActions: TextRuntimeActions;
 }
 
-const TextFileViewerInner = memo(function TextFileViewerInner({ 
-  filePath, 
-  runtimeActions 
+const TextFileViewerInner = memo(function TextFileViewerInner({
+  filePath,
+  runtimeActions,
 }: TextFileViewerInnerProps) {
   const [state, setState] = useState<LoadingState>({ status: "loading" });
   const [content, setContent] = useState("");
-  const [isDark, setIsDark] = useState(false);
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-
-  useEffect(() => {
-    const checkDark = () => setIsDark(document.documentElement.classList.contains("dark"));
-    checkDark();
-    const observer = new MutationObserver(checkDark);
-    observer.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
-    return () => observer.disconnect();
-  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -143,8 +60,7 @@ const TextFileViewerInner = memo(function TextFileViewerInner({
   const handleChange = useCallback(
     (value: string) => {
       setContent(value);
-      
-      // Debounce the file save
+
       if (saveTimeoutRef.current) {
         clearTimeout(saveTimeoutRef.current);
       }
@@ -156,10 +72,9 @@ const TextFileViewerInner = memo(function TextFileViewerInner({
         runtimeActions.writeFile(file, targetDir);
       }, 500);
     },
-    [filePath, runtimeActions]
+    [filePath, runtimeActions],
   );
 
-  // Cleanup timeout on unmount
   useEffect(() => {
     return () => {
       if (saveTimeoutRef.current) {
@@ -168,20 +83,7 @@ const TextFileViewerInner = memo(function TextFileViewerInner({
     };
   }, []);
 
-  const extension = getFileExtension(filePath);
-  const isMarkdown = extension === "md";
-
-  const extensions = useMemo(() => {
-    const exts = [
-      isDark ? textEditorThemeDark : textEditorTheme,
-      isDark ? oneDark : [],
-      EditorView.lineWrapping,
-    ];
-    if (isMarkdown) {
-      exts.push(markdown());
-    }
-    return exts;
-  }, [isDark, isMarkdown]);
+  const language = getEditorLanguage(filePath);
 
   if (state.status === "loading") {
     return (
@@ -200,26 +102,16 @@ const TextFileViewerInner = memo(function TextFileViewerInner({
   }
 
   return (
-    <div className="flex-1 bg-stone-50 dark:bg-background flex flex-col overflow-auto">
-      <div className="p-4">
-        <CodeMirror
-          value={content}
-          onChange={handleChange}
-          extensions={extensions}
-          theme="light"
-          placeholder={isMarkdown ? "# Start writing markdown..." : "Start typing..."}
-          basicSetup={{
-            lineNumbers: true,
-            foldGutter: true,
-            highlightActiveLine: true,
-            indentOnInput: true,
-            bracketMatching: true,
-            closeBrackets: true,
-            autocompletion: false,
-          }}
-          className="[&_.cm-editor]:outline-none [&_.cm-editor]:bg-transparent min-h-[200px]"
-        />
-      </div>
+    <div className="flex-1 bg-stone-50 dark:bg-background flex flex-col overflow-hidden">
+      <CodeEditor
+        value={content}
+        onChange={handleChange}
+        language={language}
+        placeholder={language === "markdown" ? "# Start writing markdown..." : "Start typing..."}
+        enableScrolling={true}
+        showLineNumbers={true}
+        resetKey={filePath}
+      />
     </div>
   );
 });
@@ -230,7 +122,7 @@ export function TextFileViewer({ filePath, runtime }: FileViewerProps) {
       readFile: runtime.readFile,
       writeFile: runtime.writeFile,
     }),
-    [runtime.readFile, runtime.writeFile]
+    [runtime.readFile, runtime.writeFile],
   );
 
   return (

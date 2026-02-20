@@ -75,6 +75,10 @@ const S3_PUBLIC_BUCKET_SUBPATH = "public_bucket";
 const HANDLE_IDLE_TIMEOUT_MS = 5000;
 let handleIdleTimer: ReturnType<typeof setTimeout> | null = null;
 
+// Track active executions (runSQL, runPython, etc.) to prevent handle
+// suspension while DuckDB or Python code is reading through OPFS handles.
+let activeExecutions = 0;
+
 /**
  * Resume OPFS handles before code execution and cancel the idle timer.
  */
@@ -91,13 +95,21 @@ async function resumeHandlesIfNeeded(): Promise<void> {
 /**
  * Schedule handle suspension after a short idle period.
  * Called after each execution completes.
+ *
+ * Suspension is skipped if there are active executions (runSQL/runPython)
+ * because DuckDB reads through OPFS sync handles — closing them mid-query
+ * causes a fatal Pyodide crash (InvalidStateError on the access handle).
  */
 function scheduleHandleSuspend(): void {
   if (handleIdleTimer !== null) {
     clearTimeout(handleIdleTimer);
   }
+  // Don't schedule if there are active executions
+  if (activeExecutions > 0) return;
   handleIdleTimer = setTimeout(async () => {
     handleIdleTimer = null;
+    // Re-check: a new execution may have started since the timer was set
+    if (activeExecutions > 0) return;
     if (virtualFS) {
       await virtualFS.suspendHandles();
     }
@@ -776,16 +788,26 @@ self.onmessage = async (event: MessageEvent<WorkerRequest>) => {
       }
 
       case "runPython": {
-        const result = await runPython(request.code);
-        postResponse({ type: "runPython", id: request.id, result });
-        scheduleHandleSuspend();
+        activeExecutions++;
+        try {
+          const result = await runPython(request.code);
+          postResponse({ type: "runPython", id: request.id, result });
+        } finally {
+          activeExecutions--;
+          scheduleHandleSuspend();
+        }
         break;
       }
 
       case "runSQL": {
-        const result = await runSQL(request.sql, request.viewName);
-        postResponse({ type: "runSQL", id: request.id, result });
-        scheduleHandleSuspend();
+        activeExecutions++;
+        try {
+          const result = await runSQL(request.sql, request.viewName);
+          postResponse({ type: "runSQL", id: request.id, result });
+        } finally {
+          activeExecutions--;
+          scheduleHandleSuspend();
+        }
         break;
       }
 
