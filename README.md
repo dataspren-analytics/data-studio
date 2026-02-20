@@ -1,6 +1,6 @@
 <div align="center">
 
-# DataSpren Helix
+# DataSpren DataStudio
 
 **Explore and visualize data, entirely in your browser. Powered by WebAssembly and DuckDB. Your data stays on your machine.**
 
@@ -10,7 +10,7 @@
 
 [Live Demo](https://local.dataspren.com) | [Getting Started](#getting-started) | [Features](#features)
 
-<img src=".github/assets/Showcase.webp" alt="DataSpren Helix notebook interface with Python, SQL, and charting" width="680">
+<img src=".github/assets/Showcase.webp" alt="DataSpren DataStudio notebook interface with Python, SQL, and charting" width="680">
 
 </div>
 
@@ -24,9 +24,9 @@ Have a feature request? [Open an issue](https://github.com/dataspren-analytics/d
 
 ---
 
-## Why Helix?
+## Why DataStudio?
 
-Most data tools require a backend, cloud account, or sending your data somewhere. Helix runs **entirely in your browser**. Python and DuckDB execute via WebAssembly, and files are stored locally using the browser's Origin Private File System. There is no server, no upload, and nothing to install.
+Most data tools require a backend, cloud account, or sending your data somewhere. DataStudio runs **entirely in your browser**. Python and DuckDB execute via WebAssembly, and files are stored locally using the browser's Origin Private File System. There is no server, no upload, and nothing to install.
 
 This makes it ideal for:
 
