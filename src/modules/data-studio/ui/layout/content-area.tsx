@@ -72,7 +72,8 @@ function ContentViewer({ filePath }: ContentViewerProps) {
   }
 
   // Show a loading state for data files when the runtime isn't ready yet
-  if (!runtime.isReady && extension !== ".ipynb") {
+  // CSV files read directly from OPFS and don't need the runtime
+  if (!runtime.isReady && extension !== ".ipynb" && extension !== ".csv") {
     return (
       <div className="flex-1 flex items-center justify-center bg-stone-50 dark:bg-background">
         <div className="flex items-center gap-2 text-neutral-400">
