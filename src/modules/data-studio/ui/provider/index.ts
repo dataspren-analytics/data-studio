@@ -5,4 +5,4 @@ export type { NotebookProviderConfig } from "./data-studio-provider";
 // Individual hooks
 export { useRuntime } from "./runtime-provider";
 export { useNotebook } from "./notebook-provider";
-export { useCells } from "./cell-provider";
+export { useCells, useCellData, useCellActions } from "./cell-provider";

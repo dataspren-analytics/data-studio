@@ -5,7 +5,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { TableData } from "../../runtime";
 import { ResizablePanel } from "../components/resizable-panel";
 import { ResultTable } from "../components/result-table";
-import { CodeEditor, type MonacoEditorHandle } from "../components/cells/code-editor";
+import { MonacoCodeEditor, type MonacoEditorHandle } from "../components/cells/monaco-code-editor";
 import type { FileViewerProps } from "./types";
 
 type FileLoadState =
@@ -202,14 +202,13 @@ const SqlFileViewerInner = memo(function SqlFileViewerInner({
 
       {/* Editor */}
       <div className="flex-1 overflow-hidden" onKeyDown={handleKeyDown}>
-        <CodeEditor
+        <MonacoCodeEditor
           ref={editorRef}
-          value={content}
+          defaultValue={content}
           onChange={handleChange}
           language="sql"
-          placeholder="-- Write your SQL query here..."
-          enableScrolling={true}
-          showLineNumbers={true}
+          enableScrolling
+          showLineNumbers
           resetKey={filePath}
         />
       </div>
