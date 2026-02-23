@@ -176,7 +176,6 @@ export const MonacoCodeEditor = forwardRef<MonacoEditorHandle, MonacoCodeEditorP
             }
             editor.layout();
           };
-          applyHeight(editor.getContentHeight());
           editor.onDidContentSizeChange((e) => {
             if (e.contentHeightChanged) {
               applyHeight(e.contentHeight);

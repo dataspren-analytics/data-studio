@@ -328,7 +328,7 @@ export function CodeCell({
             if (!document.getElementById(styleId)) {
               const style = document.createElement("style");
               style.id = styleId;
-              style.textContent = `.sql-magic-decoration { color: #6a737d !important; }`;
+              style.textContent = `.sql-magic-decoration { color: #8b949e !important; }`;
               document.head.appendChild(style);
             }
             const decorations = editor.createDecorationsCollection([]);

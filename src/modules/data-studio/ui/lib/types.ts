@@ -174,7 +174,6 @@ export interface CellActionsContextValue {
   moveCellDown: (id: string) => void;
   updateViewName: (id: string, newName: string) => void;
   updateAssertConfig: (id: string, config: { tests: AssertTest[] }) => void;
-  toggleCellEnabled: (id: string) => void;
   runCellTests: (id: string) => Promise<void>;
   updateCellMetadata: (id: string, metadata: Record<string, unknown>) => void;
   refreshVizData: (id: string, configOverride?: VisualizeConfig) => Promise<void>;

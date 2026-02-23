@@ -76,7 +76,6 @@ export function CellProvider({ children }: { children: ReactNode }) {
   const { activeFilePath, activeNotebook, updateNotebookCells } = useNotebook();
   const runtime = useRuntime();
 
-  // --- Owned cells state (single source of truth) ---
   const [cells, setCells] = useState<NotebookCell[]>(
     () => activeNotebook?.document.cells ?? [],
   );
@@ -90,11 +89,9 @@ export function CellProvider({ children }: { children: ReactNode }) {
   const nextViewNumberRef = useRef(3);
   const prevFilePathRef = useRef(activeFilePath);
 
-  // Track what we last persisted to avoid sync loops
   const lastPersistedRef = useRef<NotebookCell[] | null>(null);
   const persistTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
-  // Sync cells from notebook when notebook changes externally (e.g. switching notebooks)
   useEffect(() => {
     const incoming = activeNotebook?.document.cells;
     if (incoming && incoming !== lastPersistedRef.current) {
@@ -102,7 +99,6 @@ export function CellProvider({ children }: { children: ReactNode }) {
     }
   }, [activeNotebook?.document.cells]);
 
-  // Reset cell state when notebook file changes
   useEffect(() => {
     if (activeFilePath !== prevFilePathRef.current) {
       setSelectedCellId(cells[0]?.id ?? null);
@@ -112,7 +108,6 @@ export function CellProvider({ children }: { children: ReactNode }) {
     }
   }, [activeFilePath, cells]);
 
-  // Debounced persistence — schedules a write of current cells to notebook
   const schedulePersist = useCallback(() => {
     clearTimeout(persistTimerRef.current);
     persistTimerRef.current = setTimeout(() => {
@@ -123,14 +118,11 @@ export function CellProvider({ children }: { children: ReactNode }) {
     }, 300);
   }, [activeFilePath, updateNotebookCells]);
 
-  // Cleanup persist timer on unmount
   useEffect(() => () => clearTimeout(persistTimerRef.current), []);
 
-  // Immediate persistence — for operations that need to write immediately
   const persistNow = useCallback(() => {
     clearTimeout(persistTimerRef.current);
     if (activeFilePath) {
-      // We need to read from cellsRef in a microtask so setCells has flushed
       queueMicrotask(() => {
         lastPersistedRef.current = cellsRef.current;
         updateNotebookCells(activeFilePath, cellsRef.current);
@@ -138,7 +130,6 @@ export function CellProvider({ children }: { children: ReactNode }) {
     }
   }, [activeFilePath, updateNotebookCells]);
 
-  // Reset execution counts when runtime restarts
   const prevIsReadyRef = useRef(runtime.isReady);
   useEffect(() => {
     if (runtime.isReady && !prevIsReadyRef.current && cellsRef.current.length > 0) {
@@ -288,7 +279,6 @@ export function CellProvider({ children }: { children: ReactNode }) {
         ));
         schedulePersist();
       } catch {
-        // Silently catch — DuckDB view may not exist (e.g. after reload)
       }
     },
     [runtime, schedulePersist],
@@ -298,18 +288,6 @@ export function CellProvider({ children }: { children: ReactNode }) {
     (id: string, assertConfig: { tests: AssertTest[] }) => {
       setCells(prev => prev.map((c) =>
         c.id === id ? { ...c, metadata: { ...c.metadata, assertConfig } } : c,
-      ));
-      schedulePersist();
-    },
-    [schedulePersist],
-  );
-
-  const toggleCellEnabled = useCallback(
-    (id: string) => {
-      setCells(prev => prev.map((c) =>
-        c.id === id
-          ? { ...c, metadata: { ...c.metadata, enabled: c.metadata.enabled === false } }
-          : c,
       ));
       schedulePersist();
     },
@@ -405,13 +383,10 @@ export function CellProvider({ children }: { children: ReactNode }) {
         return next;
       });
 
-      // Clear outputs for this cell
       setCells(prev => prev.map((c) =>
         c.id === id ? { ...c, outputs: [], execution_count: execCount } : c,
       ));
       persistNow();
-
-      await new Promise((resolve) => setTimeout(resolve, 50));
 
       const outputs: CellOutput[] = [];
       const cellType = getCellType(cell.source);
@@ -463,7 +438,6 @@ export function CellProvider({ children }: { children: ReactNode }) {
           runtime.refreshTables();
           runtime.refreshVariables();
 
-          // Run embedded tests if the SQL cell has assertConfig
           const embeddedTests = cell.metadata.assertConfig?.tests;
           if (embeddedTests && embeddedTests.length > 0) {
             const assertResults = await executeAssertTests(embeddedTests);
@@ -478,7 +452,6 @@ export function CellProvider({ children }: { children: ReactNode }) {
           traceback: [err instanceof Error ? err.message : String(err)],
         } as ErrorOutput);
       } finally {
-        // Always update outputs and clear running state
         setCells(prev => prev.map((c) => (c.id === id ? { ...c, outputs } : c)));
         persistNow();
         setRunningCellIds((prev) => {
@@ -487,7 +460,6 @@ export function CellProvider({ children }: { children: ReactNode }) {
           return next;
         });
 
-        // Refresh viz data after SQL execution if cell has insights configured
         if (cellType === "sql" && cell.metadata.visualizeConfig) {
           refreshVizData(id).catch(() => {});
         }
@@ -501,27 +473,20 @@ export function CellProvider({ children }: { children: ReactNode }) {
     ],
   );
 
-  const selectNextCell = useCallback(
-    (currentId: string) => {
+  const runCellAndAdvance = useCallback(
+    (id: string, queryOverride?: string) => {
+      setQueuedCellIds((prev) => new Set(prev).add(id));
       const currentCells = cellsRef.current;
-      const currentIndex = currentCells.findIndex((c) => c.id === currentId);
+      const currentIndex = currentCells.findIndex((c) => c.id === id);
       if (currentIndex !== -1 && currentIndex < currentCells.length - 1) {
         setSelectedCellId(currentCells[currentIndex + 1].id);
       }
       if (document.activeElement instanceof HTMLElement) {
         document.activeElement.blur();
       }
-    },
-    [],
-  );
-
-  const runCellAndAdvance = useCallback(
-    (id: string, queryOverride?: string) => {
-      setQueuedCellIds((prev) => new Set(prev).add(id));
-      selectNextCell(id);
       runCell(id, queryOverride);
     },
-    [runCell, selectNextCell],
+    [runCell],
   );
 
   const runCellTests = useCallback(
@@ -537,7 +502,6 @@ export function CellProvider({ children }: { children: ReactNode }) {
       const assertResults = await executeAssertTests(tests);
       const assertOutput = createAssertOutput(assertResults);
 
-      // Replace any existing assert output, keep other outputs
       setCells(prev => prev.map((c) => {
         if (c.id !== id || !isCodeCell(c)) return c;
         const updatedOutputs = [
@@ -567,8 +531,7 @@ export function CellProvider({ children }: { children: ReactNode }) {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Enter" && (e.shiftKey || e.metaKey) && selectedCellId) {
         const target = e.target as HTMLElement;
-        const isInEditor = target instanceof HTMLTextAreaElement;
-        if (!isInEditor) {
+        if (!target.closest?.(".monaco-editor")) {
           e.preventDefault();
           runCellAndAdvance(selectedCellId);
         }
@@ -605,7 +568,6 @@ export function CellProvider({ children }: { children: ReactNode }) {
       moveCellDown,
       updateViewName,
       updateAssertConfig,
-      toggleCellEnabled,
       runCellTests,
       updateCellMetadata,
       refreshVizData,
@@ -621,7 +583,6 @@ export function CellProvider({ children }: { children: ReactNode }) {
       moveCellDown,
       updateViewName,
       updateAssertConfig,
-      toggleCellEnabled,
       runCellTests,
       updateCellMetadata,
       refreshVizData,
@@ -657,7 +618,6 @@ export function useCellActions(): CellActionsContextValue {
   return context;
 }
 
-/** Backward-compatible hook that returns both data and actions */
 export function useCells() {
   return { ...useCellData(), ...useCellActions() };
 }
