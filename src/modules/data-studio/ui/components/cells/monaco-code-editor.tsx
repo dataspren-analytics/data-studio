@@ -1,42 +1,117 @@
 "use client";
 
-import { Editor, type OnMount } from "@monaco-editor/react";
-import { useRef, useCallback, useMemo, useImperativeHandle, forwardRef } from "react";
+import { Editor, type OnMount, type Monaco } from "@monaco-editor/react";
+import { useRef, useCallback, useImperativeHandle, forwardRef } from "react";
 import type { editor } from "monaco-editor";
 import { useIsDark } from "../../hooks/use-is-dark";
 
 export type EditorLanguage = "sql" | "python" | "json" | "markdown" | "plaintext";
 
+let themesRegistered = false;
+
+function registerThemes(monaco: Monaco) {
+  if (themesRegistered) return;
+  themesRegistered = true;
+
+  const sharedRules = [
+    { token: "comment", foreground: "6a737d" },
+    { token: "keyword", foreground: "ea6045", fontStyle: "bold" },
+    { token: "function", foreground: "b3d97e" },
+    { token: "function.python", foreground: "b3d97e" },
+    { token: "predefined", foreground: "b3d97e" },
+    { token: "predefined.sql", foreground: "b3d97e" },
+    { token: "predefined.python", foreground: "b3d97e" },
+    { token: "type.sql", foreground: "b3d97e" },
+    { token: "identifier.function", foreground: "b3d97e" },
+    { token: "support.function", foreground: "b3d97e" },
+    { token: "builtin", foreground: "b3d97e" },
+    { token: "builtin.python", foreground: "b3d97e" },
+    { token: "identifier.builtin", foreground: "b3d97e" },
+    { token: "identifier.callable", foreground: "b3d97e" },
+    { token: "meta.function-call", foreground: "b3d97e" },
+    { token: "entity.name.function", foreground: "b3d97e" },
+  ];
+
+  monaco.editor.defineTheme("custom-dark", {
+    base: "vs-dark",
+    inherit: true,
+    rules: [
+      ...sharedRules,
+      { token: "number", foreground: "79c0ff" },
+      { token: "string", foreground: "e5c07b" },
+      { token: "string.sql", foreground: "e5c07b" },
+      { token: "string.quoted", foreground: "e5c07b" },
+      { token: "string.single", foreground: "e5c07b" },
+      { token: "string.double", foreground: "e5c07b" },
+      { token: "operator", foreground: "e0e0e0" },
+      { token: "delimiter", foreground: "e0e0e0" },
+      { token: "variable", foreground: "e0e0e0" },
+      { token: "type", foreground: "d2a8ff" },
+      { token: "identifier", foreground: "e0e0e0" },
+      { token: "", foreground: "e0e0e0" },
+    ],
+    colors: {
+      "editor.background": "#00000000",
+      "editor.lineHighlightBackground": "#00000000",
+    },
+  });
+
+  monaco.editor.defineTheme("custom-light", {
+    base: "vs",
+    inherit: true,
+    rules: [
+      ...sharedRules,
+      { token: "number", foreground: "005cc5" },
+      { token: "string", foreground: "b5760a" },
+      { token: "string.sql", foreground: "b5760a" },
+      { token: "string.quoted", foreground: "b5760a" },
+      { token: "string.single", foreground: "b5760a" },
+      { token: "string.double", foreground: "b5760a" },
+      { token: "operator", foreground: "24292e" },
+      { token: "delimiter", foreground: "24292e" },
+      { token: "variable", foreground: "24292e" },
+      { token: "type", foreground: "6f42c1" },
+      { token: "identifier", foreground: "24292e" },
+      { token: "", foreground: "24292e" },
+    ],
+    colors: {
+      "editor.background": "#00000000",
+      "editor.lineHighlightBackground": "#00000000",
+    },
+  });
+}
+
 export interface MonacoCodeEditorProps {
-  value: string;
+  defaultValue: string;
   onChange?: (value: string) => void;
   language: EditorLanguage;
-  placeholder?: string;
-  className?: string;
   enableScrolling?: boolean;
   showLineNumbers?: boolean;
-  /** Optional key that changes when content should be externally reset (e.g., file path change) */
+  minHeight?: number;
   resetKey?: string;
-  /** Focus the editor when it mounts */
   autoFocus?: boolean;
+  onMount?: (editor: editor.IStandaloneCodeEditor, monaco: Monaco) => void;
 }
 
 export interface MonacoEditorHandle {
   getContent: () => string;
   getSelection: () => string | null;
   focus: () => void;
+  replaceContent: (text: string) => void;
 }
 
 export const MonacoCodeEditor = forwardRef<MonacoEditorHandle, MonacoCodeEditorProps>(
   function MonacoCodeEditor(
     {
-      value,
+      defaultValue,
       onChange,
       language,
       enableScrolling = false,
       showLineNumbers = false,
+      minHeight = 80,
       resetKey,
       autoFocus = false,
+      onMount: onMountProp,
     },
     ref
   ) {
@@ -45,17 +120,16 @@ export const MonacoCodeEditor = forwardRef<MonacoEditorHandle, MonacoCodeEditorP
     const autoFocusRef = useRef(autoFocus);
     autoFocusRef.current = autoFocus;
 
-    // Expose methods to parent
     useImperativeHandle(ref, () => ({
       getContent: () => {
         const model = editorRef.current?.getModel();
         return model?.getValue() || "";
       },
       getSelection: () => {
-        const editor = editorRef.current;
-        if (!editor) return null;
-        const selection = editor.getSelection();
-        const model = editor.getModel();
+        const ed = editorRef.current;
+        if (!ed) return null;
+        const selection = ed.getSelection();
+        const model = ed.getModel();
         if (selection && model && !selection.isEmpty()) {
           return model.getValueInRange(selection);
         }
@@ -64,189 +138,111 @@ export const MonacoCodeEditor = forwardRef<MonacoEditorHandle, MonacoCodeEditorP
       focus: () => {
         editorRef.current?.focus();
       },
+      replaceContent: (text: string) => {
+        const ed = editorRef.current;
+        if (!ed) return;
+        const model = ed.getModel();
+        if (!model) return;
+        if (model.getValue() === text) return;
+        const selections = ed.getSelections();
+        ed.executeEdits("external", [{
+          range: model.getFullModelRange(),
+          text,
+          forceMoveMarkers: true,
+        }], selections ?? undefined);
+        ed.pushUndoStop();
+      },
     }));
 
-  // Calculate height based on number of lines for notebook cells
-  // For scrollable editors (like SQL viewer), use 100% to fill container
-  const height = useMemo(() => {
-    if (enableScrolling) {
-      return "100%";
-    }
-    const lines = Math.max((value || "").split("\n").length, 1);
-    const lineHeight = 21; // 14px font * 1.5 line-height
-    const padding = 16; // top + bottom padding
-    const minHeight = language === "sql" ? 42 : 80;
-    return `${Math.max(minHeight, lines * lineHeight + padding)}px`;
-  }, [value, language, enableScrolling]);
+    const containerRef = useRef<HTMLDivElement | null>(null);
+    const initialHeight = enableScrolling
+      ? 0
+      : Math.max(minHeight, Math.max((defaultValue || "").split("\n").length, 1) * 21 + 16);
+    const heightRef = useRef(initialHeight);
 
-  const handleEditorDidMount: OnMount = useCallback(
-    (editor, monaco) => {
-      editorRef.current = editor;
+    const handleEditorDidMount: OnMount = useCallback(
+      (editor, monaco) => {
+        editorRef.current = editor;
 
-      // Define custom theme matching the screenshot
-      // Brand color: oklch(0.58 0.21 35) = #ea6045
-      monaco.editor.defineTheme("custom-dark", {
-        base: "vs-dark",
-        inherit: true,
-        rules: [
-          { token: "comment", foreground: "6a737d" },
-          { token: "keyword", foreground: "ea6045", fontStyle: "bold" },
-          { token: "string", foreground: "e5c07b" },
-          { token: "string.sql", foreground: "e5c07b" },
-          { token: "string.quoted", foreground: "e5c07b" },
-          { token: "string.single", foreground: "e5c07b" },
-          { token: "string.double", foreground: "e5c07b" },
-          { token: "number", foreground: "79c0ff" },
-          { token: "function", foreground: "b3d97e" },
-          { token: "function.python", foreground: "b3d97e" },
-          { token: "predefined", foreground: "b3d97e" },
-          { token: "predefined.sql", foreground: "b3d97e" },
-          { token: "predefined.python", foreground: "b3d97e" },
-          { token: "type.sql", foreground: "b3d97e" },
-          { token: "identifier.function", foreground: "b3d97e" },
-          { token: "support.function", foreground: "b3d97e" },
-          { token: "builtin", foreground: "b3d97e" },
-          { token: "builtin.python", foreground: "b3d97e" },
-          { token: "identifier.builtin", foreground: "b3d97e" },
-          { token: "identifier.callable", foreground: "b3d97e" },
-          { token: "meta.function-call", foreground: "b3d97e" },
-          { token: "entity.name.function", foreground: "b3d97e" },
-          { token: "operator", foreground: "e0e0e0" },
-          { token: "delimiter", foreground: "e0e0e0" },
-          { token: "variable", foreground: "e0e0e0" },
-          { token: "type", foreground: "d2a8ff" },
-          { token: "identifier", foreground: "e0e0e0" },
-          { token: "", foreground: "e0e0e0" },
-        ],
-        colors: {
-          "editor.background": "#00000000",
-          "editor.lineHighlightBackground": "#00000000",
-        },
-      });
+        registerThemes(monaco);
+        monaco.editor.setTheme(isDark ? "custom-dark" : "custom-light");
 
-      monaco.editor.defineTheme("custom-light", {
-        base: "vs",
-        inherit: true,
-        rules: [
-          { token: "comment", foreground: "6a737d" },
-          { token: "keyword", foreground: "ea6045", fontStyle: "bold" },
-          { token: "string", foreground: "b5760a" },
-          { token: "string.sql", foreground: "b5760a" },
-          { token: "string.quoted", foreground: "b5760a" },
-          { token: "string.single", foreground: "b5760a" },
-          { token: "string.double", foreground: "b5760a" },
-          { token: "number", foreground: "005cc5" },
-          { token: "function", foreground: "b3d97e" },
-          { token: "function.python", foreground: "b3d97e" },
-          { token: "predefined", foreground: "b3d97e" },
-          { token: "predefined.sql", foreground: "b3d97e" },
-          { token: "predefined.python", foreground: "b3d97e" },
-          { token: "type.sql", foreground: "b3d97e" },
-          { token: "identifier.function", foreground: "b3d97e" },
-          { token: "support.function", foreground: "b3d97e" },
-          { token: "builtin", foreground: "b3d97e" },
-          { token: "builtin.python", foreground: "b3d97e" },
-          { token: "identifier.builtin", foreground: "b3d97e" },
-          { token: "identifier.callable", foreground: "b3d97e" },
-          { token: "meta.function-call", foreground: "b3d97e" },
-          { token: "entity.name.function", foreground: "b3d97e" },
-          { token: "operator", foreground: "24292e" },
-          { token: "delimiter", foreground: "24292e" },
-          { token: "variable", foreground: "24292e" },
-          { token: "type", foreground: "6f42c1" },
-          { token: "identifier", foreground: "24292e" },
-          { token: "", foreground: "24292e" },
-        ],
-        colors: {
-          "editor.background": "#00000000",
-          "editor.lineHighlightBackground": "#00000000",
-        },
-      });
-
-      monaco.editor.setTheme(isDark ? "custom-dark" : "custom-light");
-
-      // Style %sql / %%sql magic commands like comments
-      const sqlMagicStyleId = "monaco-sql-magic-style";
-      if (!document.getElementById(sqlMagicStyleId)) {
-        const style = document.createElement("style");
-        style.id = sqlMagicStyleId;
-        style.textContent = `.sql-magic-decoration { color: #6a737d !important; }`;
-        document.head.appendChild(style);
-      }
-
-      const decorationCollection = editor.createDecorationsCollection([]);
-      const updateSqlMagicDecorations = () => {
-        const model = editor.getModel();
-        if (!model) return;
-        const matches = model.findMatches("%%?sql\\b", false, true, false, null, false);
-        decorationCollection.set(
-          matches.map((match) => ({
-            range: match.range,
-            options: { inlineClassName: "sql-magic-decoration" },
-          }))
-        );
-      };
-      updateSqlMagicDecorations();
-      editor.onDidChangeModelContent(() => updateSqlMagicDecorations());
-
-      if (autoFocusRef.current) {
-        editor.focus();
-      }
-    },
-    [isDark],
-  );
-
-  const handleChange = useCallback((value: string | undefined) => {
-    onChange?.(value || "");
-  }, [onChange]);
-
-  return (
-    <Editor
-      key={resetKey}
-      height={height}
-      defaultLanguage={language}
-      language={language}
-      defaultValue={value}
-      onChange={handleChange}
-      onMount={handleEditorDidMount}
-      theme={isDark ? "custom-dark" : "custom-light"}
-      options={{
-        minimap: { enabled: false },
-        fontSize: 14,
-        lineHeight: 21, // 14px * 1.5
-        fontFamily: "Menlo, ui-monospace, SFMono-Regular, Monaco, Consolas, monospace",
-        lineNumbers: showLineNumbers ? "on" : "off",
-        scrollBeyondLastLine: false,
-        automaticLayout: true,
-        tabSize: 2,
-        wordWrap: "on",
-        wrappingIndent: "indent",
-        padding: { top: 0, bottom: 0 },
-        suggest: {
-          showWords: false,
-        },
-        quickSuggestions: false,
-        contextmenu: true,
-        scrollbar: enableScrolling
-          ? {
-              vertical: "auto",
-              horizontal: "auto",
-              useShadows: false,
-              handleMouseWheel: true,
+        if (!enableScrolling) {
+          const applyHeight = (h: number) => {
+            const clamped = Math.max(minHeight, h);
+            heightRef.current = clamped;
+            if (containerRef.current) {
+              containerRef.current.style.height = `${clamped}px`;
             }
-          : {
-              vertical: "hidden",
-              horizontal: "hidden",
-              useShadows: false,
-              handleMouseWheel: false,
-            },
-        overviewRulerLanes: 0,
-        hideCursorInOverviewRuler: true,
-        overviewRulerBorder: false,
-        renderLineHighlight: "none",
-        glyphMargin: false,
-        folding: false,
-      }}
-    />
-  );
-});
+            editor.layout();
+          };
+          editor.onDidContentSizeChange((e) => {
+            if (e.contentHeightChanged) {
+              applyHeight(e.contentHeight);
+              editor.setScrollTop(0);
+            }
+          });
+        }
+
+        if (autoFocusRef.current) {
+          editor.focus();
+        }
+
+        onMountProp?.(editor, monaco);
+      },
+      [isDark, enableScrolling, onMountProp],
+    );
+
+    const handleChange = useCallback((newValue: string | undefined) => {
+      onChange?.(newValue || "");
+    }, [onChange]);
+
+    const editorOptions = {
+      minimap: { enabled: false },
+      fontSize: 14,
+      lineHeight: 21,
+      fontFamily: "Menlo, ui-monospace, SFMono-Regular, Monaco, Consolas, monospace",
+      lineNumbers: showLineNumbers ? ("on" as const) : ("off" as const),
+      scrollBeyondLastLine: false,
+      automaticLayout: true,
+      tabSize: 2,
+      wordWrap: "on" as const,
+      wrappingIndent: "indent" as const,
+      padding: { top: 0, bottom: 0 },
+      suggest: { showWords: false },
+      quickSuggestions: false,
+      contextmenu: true,
+      scrollbar: enableScrolling
+        ? { vertical: "auto" as const, horizontal: "auto" as const, useShadows: false, handleMouseWheel: true }
+        : { vertical: "hidden" as const, horizontal: "hidden" as const, useShadows: false, handleMouseWheel: false },
+      overviewRulerLanes: 0,
+      hideCursorInOverviewRuler: true,
+      overviewRulerBorder: false,
+      renderLineHighlight: "none" as const,
+      glyphMargin: false,
+      folding: false,
+    };
+
+    const editorEl = (
+      <Editor
+        key={resetKey}
+        height="100%"
+        defaultLanguage={language}
+        language={language}
+        defaultValue={defaultValue}
+        onChange={handleChange}
+        onMount={handleEditorDidMount}
+        theme={isDark ? "custom-dark" : "custom-light"}
+        options={editorOptions}
+      />
+    );
+
+    if (enableScrolling) return editorEl;
+
+    return (
+      <div ref={containerRef} style={{ height: `${heightRef.current}px`, overflow: "hidden" }}>
+        {editorEl}
+      </div>
+    );
+  },
+);

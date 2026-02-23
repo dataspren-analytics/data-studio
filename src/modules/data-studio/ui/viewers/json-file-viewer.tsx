@@ -2,7 +2,7 @@
 
 import { FileJson, Loader2 } from "lucide-react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { CodeEditor } from "../components/cells/code-editor";
+import { MonacoCodeEditor } from "../components/cells/monaco-code-editor";
 import type { FileViewerProps } from "./types";
 
 type LoadingState =
@@ -106,13 +106,12 @@ const JsonFileViewerInner = memo(function JsonFileViewerInner({
 
   return (
     <div className="flex-1 bg-stone-50 dark:bg-background flex flex-col overflow-hidden">
-      <CodeEditor
-        value={content}
+      <MonacoCodeEditor
+        defaultValue={content}
         onChange={handleChange}
         language="json"
-        placeholder="{}"
-        enableScrolling={true}
-        showLineNumbers={true}
+        enableScrolling
+        showLineNumbers
         resetKey={filePath}
       />
     </div>

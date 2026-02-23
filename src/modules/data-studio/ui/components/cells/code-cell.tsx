@@ -7,7 +7,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
-import { CodeEditor, type MonacoEditorHandle } from "./code-editor";
+import { MonacoCodeEditor, type MonacoEditorHandle } from "./monaco-code-editor";
 import { Check, ChevronDown, Loader2, Play } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { cellTypeConfig, type SelectableCellType } from "../../lib/constants";
@@ -16,7 +16,6 @@ import {
   extractTableData,
   getCellType,
   getSourceString,
-  type AssertResult,
   type AssertTest,
   type CodeCell as CodeCellType,
   type DataSprenCellType,
@@ -83,10 +82,20 @@ export function CodeCell({
   const cellRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<MonacoEditorHandle>(null);
 
-  // Focus editor when cell becomes selected, blur when deselected
   useEffect(() => {
     if (isSelected) {
-      editorRef.current?.focus();
+      if (editorRef.current) {
+        editorRef.current.focus();
+      } else {
+        // Editor hasn't mounted yet (new cell), retry until it's ready 
+        const timer = setInterval(() => {
+          if (editorRef.current) {
+            editorRef.current.focus();
+            clearInterval(timer);
+          }
+        }, 50);
+        return () => clearInterval(timer);
+      }
     } else if (
       document.activeElement instanceof HTMLElement &&
       cellRef.current?.contains(document.activeElement)
@@ -120,12 +129,9 @@ export function CodeCell({
     setActiveTab(tab);
     onUpdateMetadata?.({ activeTab: tab });
   }, [onUpdateMetadata]);
-  const isSQL = getCellType(cell.source) === "sql";
   const assertConfig = cell.metadata.assertConfig || { tests: [] };
 
-  const assertResults = useMemo(() => {
-    return extractAssertResults(cell.outputs) || [];
-  }, [cell.outputs]);
+  const assertResults = useMemo(() => extractAssertResults(cell.outputs) || [], [cell.outputs]);
 
   const allTestsPassed = assertResults.length > 0 && assertResults.every((r) => r.passed);
   const anyTestsFailed = assertResults.some((r) => !r.passed);
@@ -145,62 +151,52 @@ export function CodeCell({
       ? "text-emerald-400 bg-emerald-500/15 hover:bg-emerald-500/25 dark:text-emerald-300 dark:bg-emerald-500/20 dark:hover:bg-emerald-500/30"
       : "text-neutral-400 bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700";
 
-  const hasOutput = cell.outputs.length > 0 || isQueued || isRunning;
-  const showOutputArea = hasOutput || (isSQL && hasTests);
-
   const errorMessage = useMemo(() => {
     const errorOutput = cell.outputs.find((o) => o.output_type === "error");
-    if (!errorOutput || errorOutput.output_type !== "error") return null;
-    return errorOutput.evalue;
+    return errorOutput?.output_type === "error" ? errorOutput.evalue : null;
   }, [cell.outputs]);
   const cellType = getCellType(cell.source);
   const typeConfig = cellTypeConfig[cellType as SelectableCellType] ?? cellTypeConfig.python;
+  const isSQL = cellType === "sql";
+  const hasOutput = cell.outputs.length > 0 || isQueued || isRunning;
+  const showOutputArea = hasOutput || (isSQL && hasTests);
 
-  // Local state buffer for editor — prevents full notebook re-render on every keystroke
-  const parentSource = useMemo(() => getSourceString(cell.source), [cell.source]);
-  const [localSource, setLocalSource] = useState(parentSource);
-  const localSourceRef = useRef(parentSource);
+  const cellSource = useMemo(() => getSourceString(cell.source), [cell.source]);
+
+  const lastSyncedRef = useRef(cellSource);
   const syncTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
-  // Sync from parent when source changes externally (e.g. cell type change)
-  useEffect(() => {
-    if (parentSource !== localSourceRef.current) {
-      setLocalSource(parentSource);
-      localSourceRef.current = parentSource;
-    }
-  }, [parentSource]);
-
   const handleSourceChange = useCallback((value: string) => {
-    setLocalSource(value);
-    localSourceRef.current = value;
+    lastSyncedRef.current = value;
     clearTimeout(syncTimerRef.current);
     syncTimerRef.current = setTimeout(() => onUpdate(value), 300);
   }, [onUpdate]);
 
-  // Cleanup debounce timer on unmount
   useEffect(() => () => clearTimeout(syncTimerRef.current), []);
+
+  useEffect(() => {
+    if (cellSource !== lastSyncedRef.current) {
+      lastSyncedRef.current = cellSource;
+      editorRef.current?.replaceContent(cellSource);
+    }
+  }, [cellSource]);
 
   const handleRunCell = useCallback(() => {
     if (!isRuntimeReady || !editorRef.current) return;
-
-    // Flush any pending debounced update before running
     clearTimeout(syncTimerRef.current);
+    const content = editorRef.current.getContent();
+    lastSyncedRef.current = content;
+    onUpdate(content);
 
     const selection = editorRef.current.getSelection();
-    const content = editorRef.current.getContent();
-
     if (selection && cellType === "sql") {
-      // For SQL cells with selected text, run only the selection
       onRun(selection);
     } else {
-      // Update cell source with current editor content, then run
-      onUpdate(content);
       onRun();
     }
   }, [isRuntimeReady, onRun, onUpdate, cellType]);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
-    // Cmd+Enter or Shift+Enter to run
     if (e.key === "Enter" && (e.metaKey || e.ctrlKey || e.shiftKey)) {
       e.preventDefault();
       e.stopPropagation();
@@ -210,19 +206,16 @@ export function CodeCell({
 
   return (
     <div ref={cellRef} className="relative" data-cell-id={cell.id}>
-      {/* Execution count — positioned outside the cell */}
       <span className="absolute -left-14 top-1.5 w-12 text-right text-xs text-neutral-400 dark:text-neutral-500 select-none">
         [{cell.execution_count ?? " "}]
       </span>
 
       <CellWrapper isSelected={isSelected} isRunning={isRunning} isQueued={isQueued} onSelect={onSelect}>
-        {/* Toolbar */}
         <div className="relative z-20 flex items-center gap-1 px-3 py-1.5 border-b border-neutral-200/50 dark:border-border/50">
-          {/* Run button — always visible */}
           <button
             onClick={(e) => {
               e.stopPropagation();
-              onRun();
+              handleRunCell();
             }}
             disabled={!isRuntimeReady || isRunning}
             className="p-1 text-neutral-400 hover:text-emerald-600 hover:bg-emerald-50 dark:text-neutral-500 dark:hover:text-emerald-400 dark:hover:bg-emerald-950 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
@@ -231,7 +224,6 @@ export function CodeCell({
             {isRunning ? <Loader2 size={14} className="animate-spin text-white" /> : <Play size={14} />}
           </button>
 
-        {/* Cell type dropdown */}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <button
@@ -319,26 +311,46 @@ export function CodeCell({
         />
       </div>
 
-      {/* Editor */}
       <div
         className="p-3"
         onClick={(e) => { e.stopPropagation(); onSelect(); }}
         onKeyDown={handleKeyDown}
       >
-        <CodeEditor
+        <MonacoCodeEditor
           ref={editorRef}
-          value={localSource}
+          defaultValue={cellSource}
           onChange={handleSourceChange}
           language={cellType === "sql" ? "sql" : "python"}
-          placeholder={cellType === "sql" ? "-- Enter SQL query..." : "# Enter Python code..."}
+          minHeight={cellType === "sql" ? 42 : 80}
           autoFocus={isSelected}
+          onMount={(editor) => {
+            const styleId = "monaco-sql-magic-style";
+            if (!document.getElementById(styleId)) {
+              const style = document.createElement("style");
+              style.id = styleId;
+              style.textContent = `.sql-magic-decoration { color: #8b949e !important; }`;
+              document.head.appendChild(style);
+            }
+            const decorations = editor.createDecorationsCollection([]);
+            const update = () => {
+              const model = editor.getModel();
+              if (!model) return;
+              const matches = model.findMatches("%%?sql\\b", false, true, false, null, false);
+              decorations.set(
+                matches.map((m) => ({
+                  range: m.range,
+                  options: { inlineClassName: "sql-magic-decoration" },
+                })),
+              );
+            };
+            update();
+            editor.onDidChangeModelContent(update);
+          }}
         />
       </div>
 
-      {/* Output */}
       {showOutputArea && (
         <div className="border-t border-neutral-200 dark:border-neutral-700 bg-neutral-50/50 dark:bg-muted/50 overflow-hidden rounded-b-lg">
-          {/* Tab bar for SQL cells */}
           {isSQL && (
             <div className="flex items-center" onClick={(e) => e.stopPropagation()}>
               <button
@@ -391,14 +403,12 @@ export function CodeCell({
             </div>
           )}
 
-          {/* Error banner — visible on all tabs except Results (which shows errors via CellOutput) */}
           {isSQL && errorMessage && activeTab !== "results" && (
             <pre className="text-sm font-mono text-red-500 dark:text-red-400 whitespace-pre px-3 py-2 overflow-x-auto w-0 min-w-full border-b border-red-200/50 dark:border-red-900/30">
               {errorMessage}
             </pre>
           )}
 
-          {/* Results tab content */}
           {(!isSQL || activeTab === "results") && (
             <CellOutput
               cell={cell}
@@ -409,7 +419,6 @@ export function CodeCell({
             />
           )}
 
-          {/* Insights tab content */}
           {isSQL && activeTab === "insights" && (
             <InsightsPanel
               tableData={tableData}
@@ -421,7 +430,6 @@ export function CodeCell({
             />
           )}
 
-          {/* Tests tab content */}
           {isSQL && activeTab === "tests" && (
             <TestPanel
               assertConfig={assertConfig}

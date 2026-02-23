@@ -2,7 +2,7 @@
 
 import { Loader2 } from "lucide-react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { CodeEditor, type EditorLanguage } from "../components/cells/code-editor";
+import { MonacoCodeEditor, type EditorLanguage } from "../components/cells/monaco-code-editor";
 import type { FileViewerProps } from "./types";
 
 type LoadingState =
@@ -103,13 +103,12 @@ const TextFileViewerInner = memo(function TextFileViewerInner({
 
   return (
     <div className="flex-1 bg-stone-50 dark:bg-background flex flex-col overflow-hidden">
-      <CodeEditor
-        value={content}
+      <MonacoCodeEditor
+        defaultValue={content}
         onChange={handleChange}
         language={language}
-        placeholder={language === "markdown" ? "# Start writing markdown..." : "Start typing..."}
-        enableScrolling={true}
-        showLineNumbers={true}
+        enableScrolling
+        showLineNumbers
         resetKey={filePath}
       />
     </div>

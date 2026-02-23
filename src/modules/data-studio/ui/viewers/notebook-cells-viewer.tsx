@@ -1,17 +1,16 @@
 "use client";
 
 import { Plus } from "lucide-react";
-import React from "react";
+import React, { memo } from "react";
 import { isCodeCell, isMarkdownCell } from "../../runtime/core/nbformat";
 import { AddCellDivider, CodeCell, MarkdownCellComponent } from "../components/cells";
-import { useCells, useRuntime } from "../provider";
+import { useCellData, useCellActions, useRuntime } from "../provider";
+
+const MemoizedCodeCell = memo(CodeCell);
 
 export function NotebookCellsViewer() {
+  const { cells, selectedCellId, runningCellIds, queuedCellIds } = useCellData();
   const {
-    cells,
-    selectedCellId,
-    runningCellIds,
-    queuedCellIds,
     selectCell,
     addCell,
     updateCell,
@@ -25,7 +24,7 @@ export function NotebookCellsViewer() {
     updateViewName,
     updateCellMetadata,
     refreshVizData,
-  } = useCells();
+  } = useCellActions();
   const runtime = useRuntime();
   return (
     <div
@@ -65,7 +64,7 @@ export function NotebookCellsViewer() {
             const isRunning = runningCellIds.has(cell.id);
             const isQueued = queuedCellIds.has(cell.id);
             cellElement = (
-              <CodeCell
+              <MemoizedCodeCell
                 key={cell.id}
                 cell={cell}
                 isSelected={selectedCellId === cell.id}

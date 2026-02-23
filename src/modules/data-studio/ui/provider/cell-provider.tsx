@@ -30,7 +30,7 @@ import {
   type StreamOutput,
   type VisualizeConfig,
 } from "../../runtime";
-import type { CellContextValue } from "../lib/types";
+import type { CellDataContextValue, CellActionsContextValue } from "../lib/types";
 import { generateId, generateTestSQL } from "../lib/utils";
 import {
   buildVizQuery,
@@ -62,18 +62,22 @@ function getMaxExecutionCount(cells: NotebookCell[]): number {
 }
 
 // ============================================================================
-// Cell Provider
+// Contexts
 // ============================================================================
 
-const CellContext = createContext<CellContextValue | null>(null);
+const CellDataContext = createContext<CellDataContextValue | null>(null);
+const CellActionsContext = createContext<CellActionsContextValue | null>(null);
+
+// ============================================================================
+// Cell Provider
+// ============================================================================
 
 export function CellProvider({ children }: { children: ReactNode }) {
   const { activeFilePath, activeNotebook, updateNotebookCells } = useNotebook();
   const runtime = useRuntime();
 
-  const cells = useMemo(
+  const [cells, setCells] = useState<NotebookCell[]>(
     () => activeNotebook?.document.cells ?? [],
-    [activeNotebook?.document.cells],
   );
   const [selectedCellId, setSelectedCellId] = useState<string | null>(cells[0]?.id ?? null);
   const [runningCellIds, setRunningCellIds] = useState<Set<string>>(new Set());
@@ -85,7 +89,16 @@ export function CellProvider({ children }: { children: ReactNode }) {
   const nextViewNumberRef = useRef(3);
   const prevFilePathRef = useRef(activeFilePath);
 
-  // Reset cell state when notebook changes
+  const lastPersistedRef = useRef<NotebookCell[] | null>(null);
+  const persistTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+
+  useEffect(() => {
+    const incoming = activeNotebook?.document.cells;
+    if (incoming && incoming !== lastPersistedRef.current) {
+      setCells(incoming);
+    }
+  }, [activeNotebook?.document.cells]);
+
   useEffect(() => {
     if (activeFilePath !== prevFilePathRef.current) {
       setSelectedCellId(cells[0]?.id ?? null);
@@ -95,32 +108,44 @@ export function CellProvider({ children }: { children: ReactNode }) {
     }
   }, [activeFilePath, cells]);
 
-  // Reset execution counts when runtime restarts
+  const schedulePersist = useCallback(() => {
+    clearTimeout(persistTimerRef.current);
+    persistTimerRef.current = setTimeout(() => {
+      if (activeFilePath) {
+        lastPersistedRef.current = cellsRef.current;
+        updateNotebookCells(activeFilePath, cellsRef.current);
+      }
+    }, 300);
+  }, [activeFilePath, updateNotebookCells]);
+
+  useEffect(() => () => clearTimeout(persistTimerRef.current), []);
+
+  const persistNow = useCallback(() => {
+    clearTimeout(persistTimerRef.current);
+    if (activeFilePath) {
+      queueMicrotask(() => {
+        lastPersistedRef.current = cellsRef.current;
+        updateNotebookCells(activeFilePath, cellsRef.current);
+      });
+    }
+  }, [activeFilePath, updateNotebookCells]);
+
   const prevIsReadyRef = useRef(runtime.isReady);
   useEffect(() => {
-    if (runtime.isReady && !prevIsReadyRef.current && cells.length > 0) {
-      updateNotebookCells(
-        activeFilePath!,
-        cells.map((c) =>
-          isCodeCell(c) && c.execution_count != null
-            ? { ...c, execution_count: null }
-            : c,
-        ),
-      );
+    if (runtime.isReady && !prevIsReadyRef.current && cellsRef.current.length > 0) {
+      setCells(prev => prev.map((c) =>
+        isCodeCell(c) && c.execution_count != null
+          ? { ...c, execution_count: null }
+          : c,
+      ));
+      persistNow();
     }
     prevIsReadyRef.current = runtime.isReady;
-  }, [runtime.isReady, cells, activeFilePath, updateNotebookCells]);
+  }, [runtime.isReady, persistNow]);
 
   // ============================================================================
-  // Cell Document Actions
+  // Cell Document Actions — all use functional updaters (no stale closures)
   // ============================================================================
-
-  const updateCells = useCallback(
-    (newCells: NotebookCell[]) => {
-      if (activeFilePath) updateNotebookCells(activeFilePath, newCells);
-    },
-    [activeFilePath, updateNotebookCells],
-  );
 
   const addCell = useCallback(
     (type: DataSprenCellType | "markdown" = "python", afterId?: string) => {
@@ -135,111 +160,97 @@ export function CellProvider({ children }: { children: ReactNode }) {
       } else {
         newCell = createCell(type, nextViewNumberRef.current++);
       }
-      if (afterId) {
-        const index = cells.findIndex((c) => c.id === afterId);
-        updateCells([...cells.slice(0, index + 1), newCell, ...cells.slice(index + 1)]);
-      } else {
-        updateCells([...cells, newCell]);
-      }
+      setCells(prev => {
+        if (afterId) {
+          const index = prev.findIndex((c) => c.id === afterId);
+          return [...prev.slice(0, index + 1), newCell, ...prev.slice(index + 1)];
+        }
+        return [...prev, newCell];
+      });
+      schedulePersist();
       setSelectedCellId(newCell.id);
 
-      // Focus the new cell's textarea via DOM polling.
-      // Radix DropdownMenu steals focus back on close with variable timing,
-      // so we keep retrying until focus actually sticks.
-      const focusTimer = setInterval(() => {
-        const el = document.querySelector(
-          `[data-cell-id="${newCell.id}"] textarea`,
-        ) as HTMLTextAreaElement | null;
-        if (!el) return;
-        el.focus();
-        if (document.activeElement === el) {
-          clearInterval(focusTimer);
-          el.setSelectionRange(el.value.length, el.value.length);
-        }
-      }, 50);
-      setTimeout(() => clearInterval(focusTimer), 3000);
     },
-    [cells, updateCells],
+    [schedulePersist],
   );
 
   const updateCell = useCallback(
     (id: string, source: string) => {
-      updateCells(cells.map((c) => (c.id === id ? { ...c, source } : c)));
+      setCells(prev => prev.map((c) => (c.id === id ? { ...c, source } : c)));
+      schedulePersist();
     },
-    [cells, updateCells],
+    [schedulePersist],
   );
 
   const deleteCell = useCallback(
     (id: string) => {
-      const filtered = cells.filter((c) => c.id !== id);
-      if (filtered.length === 0) {
-        const emptyCell: CodeCell = {
-          id: generateId(),
-          cell_type: "code",
-          source: "",
-          outputs: [],
-          execution_count: null,
-          metadata: {},
-        };
-        updateCells([emptyCell]);
-      } else {
-        updateCells(filtered);
-      }
+      setCells(prev => {
+        const filtered = prev.filter((c) => c.id !== id);
+        if (filtered.length === 0) {
+          return [{
+            id: generateId(),
+            cell_type: "code",
+            source: "",
+            outputs: [],
+            execution_count: null,
+            metadata: {},
+          } as CodeCell];
+        }
+        return filtered;
+      });
+      schedulePersist();
     },
-    [cells, updateCells],
+    [schedulePersist],
   );
 
   const changeCellType = useCallback(
     (id: string, datasprenType: DataSprenCellType | "markdown") => {
-      updateCells(
-        cells.map((c): NotebookCell => {
-          if (c.id !== id) return c;
-          if (datasprenType === "markdown") {
-            return {
-              id: c.id,
-              cell_type: "markdown",
-              source: getExecutableSource(c.source),
-              metadata: {},
-            } satisfies MarkdownCell;
-          }
-          const currentSource = getSourceString(c.source);
-          const currentType = getCellType(c.source);
-          let newSource: string;
-          if (datasprenType === "sql" && currentType !== "sql") {
-            newSource = `%sql\n${currentSource}`;
-          } else if (datasprenType === "python" && currentType === "sql") {
-            newSource = getExecutableSource(c.source);
-          } else {
-            newSource = currentSource;
-          }
-          const needsViewName = datasprenType === "sql" && !c.metadata.viewName;
+      setCells(prev => prev.map((c): NotebookCell => {
+        if (c.id !== id) return c;
+        if (datasprenType === "markdown") {
           return {
             id: c.id,
-            cell_type: "code",
-            source: newSource,
-            outputs: [],
-            execution_count: null,
-            metadata: {
-              ...c.metadata,
-              viewName: needsViewName ? `t${nextViewNumberRef.current++}` : c.metadata.viewName,
-            },
-          };
-        }),
-      );
+            cell_type: "markdown",
+            source: getExecutableSource(c.source),
+            metadata: {},
+          } satisfies MarkdownCell;
+        }
+        const currentSource = getSourceString(c.source);
+        const currentType = getCellType(c.source);
+        let newSource: string;
+        if (datasprenType === "sql" && currentType !== "sql") {
+          newSource = `%sql\n${currentSource}`;
+        } else if (datasprenType === "python" && currentType === "sql") {
+          newSource = getExecutableSource(c.source);
+        } else {
+          newSource = currentSource;
+        }
+        const needsViewName = datasprenType === "sql" && !c.metadata.viewName;
+        return {
+          id: c.id,
+          cell_type: "code",
+          source: newSource,
+          outputs: [],
+          execution_count: null,
+          metadata: {
+            ...c.metadata,
+            viewName: needsViewName ? `t${nextViewNumberRef.current++}` : c.metadata.viewName,
+          },
+        };
+      }));
+      schedulePersist();
     },
-    [cells, updateCells],
+    [schedulePersist],
   );
-
 
   const updateCellMetadata = useCallback(
     (id: string, metadata: Record<string, unknown>) => {
-      updateCells(
-        cells.map((c) =>
-          c.id === id ? { ...c, metadata: { ...c.metadata, ...metadata } } : c,
-        ),
-      );
+      setCells(prev => prev.map((c) =>
+        c.id === id ? { ...c, metadata: { ...c.metadata, ...metadata } } : c,
+      ));
+      schedulePersist();
     },
-    [cells, updateCells],
+    [schedulePersist],
   );
 
   const refreshVizData = useCallback(
@@ -263,73 +274,62 @@ export function CellProvider({ children }: { children: ReactNode }) {
       try {
         const result = await runtime.runSQL(query);
         const data = result.tableData && result.tableData.length > 0 ? result.tableData : null;
-        updateCells(
-          cellsRef.current.map((c) =>
-            c.id === id ? { ...c, metadata: { ...c.metadata, visualizeData: data } } : c,
-          ),
-        );
+        setCells(prev => prev.map((c) =>
+          c.id === id ? { ...c, metadata: { ...c.metadata, visualizeData: data } } : c,
+        ));
+        schedulePersist();
       } catch {
-        // Silently catch — DuckDB view may not exist (e.g. after reload)
       }
     },
-    [runtime, updateCells],
+    [runtime, schedulePersist],
   );
 
   const updateAssertConfig = useCallback(
     (id: string, assertConfig: { tests: AssertTest[] }) => {
-      updateCells(
-        cells.map((c) =>
-          c.id === id ? { ...c, metadata: { ...c.metadata, assertConfig } } : c,
-        ),
-      );
+      setCells(prev => prev.map((c) =>
+        c.id === id ? { ...c, metadata: { ...c.metadata, assertConfig } } : c,
+      ));
+      schedulePersist();
     },
-    [cells, updateCells],
-  );
-
-  const toggleCellEnabled = useCallback(
-    (id: string) => {
-      updateCells(
-        cells.map((c) =>
-          c.id === id
-            ? { ...c, metadata: { ...c.metadata, enabled: c.metadata.enabled === false } }
-            : c,
-        ),
-      );
-    },
-    [cells, updateCells],
+    [schedulePersist],
   );
 
   const updateViewName = useCallback(
     (id: string, newName: string) => {
-      updateCells(
-        cells.map((c) =>
-          c.id === id ? { ...c, metadata: { ...c.metadata, viewName: newName } } : c,
-        ),
-      );
+      setCells(prev => prev.map((c) =>
+        c.id === id ? { ...c, metadata: { ...c.metadata, viewName: newName } } : c,
+      ));
+      schedulePersist();
     },
-    [cells, updateCells],
+    [schedulePersist],
   );
 
   const moveCellUp = useCallback(
     (id: string) => {
-      const index = cells.findIndex((c) => c.id === id);
-      if (index <= 0) return;
-      const newCells = [...cells];
-      [newCells[index - 1], newCells[index]] = [newCells[index], newCells[index - 1]];
-      updateCells(newCells);
+      setCells(prev => {
+        const index = prev.findIndex((c) => c.id === id);
+        if (index <= 0) return prev;
+        const newCells = [...prev];
+        [newCells[index - 1], newCells[index]] = [newCells[index], newCells[index - 1]];
+        return newCells;
+      });
+      schedulePersist();
     },
-    [cells, updateCells],
+    [schedulePersist],
   );
 
   const moveCellDown = useCallback(
     (id: string) => {
-      const index = cells.findIndex((c) => c.id === id);
-      if (index === -1 || index >= cells.length - 1) return;
-      const newCells = [...cells];
-      [newCells[index], newCells[index + 1]] = [newCells[index + 1], newCells[index]];
-      updateCells(newCells);
+      setCells(prev => {
+        const index = prev.findIndex((c) => c.id === id);
+        if (index === -1 || index >= prev.length - 1) return prev;
+        const newCells = [...prev];
+        [newCells[index], newCells[index + 1]] = [newCells[index + 1], newCells[index]];
+        return newCells;
+      });
+      schedulePersist();
     },
-    [cells, updateCells],
+    [schedulePersist],
   );
 
   // ============================================================================
@@ -383,12 +383,10 @@ export function CellProvider({ children }: { children: ReactNode }) {
         return next;
       });
 
-      // Clear outputs for this cell (read latest cells via ref)
-      updateCells(cellsRef.current.map((c) =>
+      setCells(prev => prev.map((c) =>
         c.id === id ? { ...c, outputs: [], execution_count: execCount } : c,
       ));
-
-      await new Promise((resolve) => setTimeout(resolve, 50));
+      persistNow();
 
       const outputs: CellOutput[] = [];
       const cellType = getCellType(cell.source);
@@ -440,7 +438,6 @@ export function CellProvider({ children }: { children: ReactNode }) {
           runtime.refreshTables();
           runtime.refreshVariables();
 
-          // Run embedded tests if the SQL cell has assertConfig
           const embeddedTests = cell.metadata.assertConfig?.tests;
           if (embeddedTests && embeddedTests.length > 0) {
             const assertResults = await executeAssertTests(embeddedTests);
@@ -455,53 +452,46 @@ export function CellProvider({ children }: { children: ReactNode }) {
           traceback: [err instanceof Error ? err.message : String(err)],
         } as ErrorOutput);
       } finally {
-        // Always update outputs and clear running state — use latest cells via ref
-        updateCells(cellsRef.current.map((c) => (c.id === id ? { ...c, outputs } : c)));
+        setCells(prev => prev.map((c) => (c.id === id ? { ...c, outputs } : c)));
+        persistNow();
         setRunningCellIds((prev) => {
           const next = new Set(prev);
           next.delete(id);
           return next;
         });
 
-        // Refresh viz data after SQL execution if cell has insights configured
         if (cellType === "sql" && cell.metadata.visualizeConfig) {
           refreshVizData(id).catch(() => {});
         }
       }
     },
     [
-      updateCells,
       runtime,
       executeAssertTests,
       refreshVizData,
+      persistNow,
     ],
-  );
-
-  const selectNextCell = useCallback(
-    (currentId: string) => {
-      const currentIndex = cells.findIndex((c) => c.id === currentId);
-      if (currentIndex !== -1 && currentIndex < cells.length - 1) {
-        setSelectedCellId(cells[currentIndex + 1].id);
-      }
-      if (document.activeElement instanceof HTMLElement) {
-        document.activeElement.blur();
-      }
-    },
-    [cells],
   );
 
   const runCellAndAdvance = useCallback(
     (id: string, queryOverride?: string) => {
       setQueuedCellIds((prev) => new Set(prev).add(id));
-      selectNextCell(id);
+      const currentCells = cellsRef.current;
+      const currentIndex = currentCells.findIndex((c) => c.id === id);
+      if (currentIndex !== -1 && currentIndex < currentCells.length - 1) {
+        setSelectedCellId(currentCells[currentIndex + 1].id);
+      }
+      if (document.activeElement instanceof HTMLElement) {
+        document.activeElement.blur();
+      }
       runCell(id, queryOverride);
     },
-    [runCell, selectNextCell],
+    [runCell],
   );
 
   const runCellTests = useCallback(
     async (id: string) => {
-      const cell = cells.find((c) => c.id === id);
+      const cell = cellsRef.current.find((c) => c.id === id);
       if (!cell || !isCodeCell(cell)) return;
 
       const tests = cell.metadata.assertConfig?.tests;
@@ -512,23 +502,25 @@ export function CellProvider({ children }: { children: ReactNode }) {
       const assertResults = await executeAssertTests(tests);
       const assertOutput = createAssertOutput(assertResults);
 
-      // Replace any existing assert output, keep other outputs
-      const updatedOutputs = [
-        ...cell.outputs.filter(
-          (o: CellOutput) =>
-            !(o.output_type === "display_data" && "data" in o && (o.data as Record<string, unknown>)?.["application/vnd.dataspren.assert+json"]),
-        ),
-        assertOutput,
-      ];
-
-      updateCells(cells.map((c) => (c.id === id ? { ...c, outputs: updatedOutputs } : c)));
+      setCells(prev => prev.map((c) => {
+        if (c.id !== id || !isCodeCell(c)) return c;
+        const updatedOutputs = [
+          ...c.outputs.filter(
+            (o: CellOutput) =>
+              !(o.output_type === "display_data" && "data" in o && (o.data as Record<string, unknown>)?.["application/vnd.dataspren.assert+json"]),
+          ),
+          assertOutput,
+        ];
+        return { ...c, outputs: updatedOutputs };
+      }));
+      persistNow();
       setRunningCellIds((prev) => {
         const next = new Set(prev);
         next.delete(id);
         return next;
       });
     },
-    [cells, executeAssertTests, updateCells],
+    [executeAssertTests, persistNow],
   );
 
   // ============================================================================
@@ -539,8 +531,7 @@ export function CellProvider({ children }: { children: ReactNode }) {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Enter" && (e.shiftKey || e.metaKey) && selectedCellId) {
         const target = e.target as HTMLElement;
-        const isInEditor = target instanceof HTMLTextAreaElement;
-        if (!isInEditor) {
+        if (!target.closest?.(".monaco-editor")) {
           e.preventDefault();
           runCellAndAdvance(selectedCellId);
         }
@@ -551,15 +542,21 @@ export function CellProvider({ children }: { children: ReactNode }) {
   }, [selectedCellId, runCellAndAdvance]);
 
   // ============================================================================
-  // Context Value
+  // Context Values — split for performance
   // ============================================================================
 
-  const contextValue = useMemo<CellContextValue>(
+  const dataValue = useMemo<CellDataContextValue>(
     () => ({
       cells,
       selectedCellId,
       runningCellIds,
       queuedCellIds,
+    }),
+    [cells, selectedCellId, runningCellIds, queuedCellIds],
+  );
+
+  const actionsValue = useMemo<CellActionsContextValue>(
+    () => ({
       selectCell: setSelectedCellId,
       addCell,
       updateCell,
@@ -571,16 +568,11 @@ export function CellProvider({ children }: { children: ReactNode }) {
       moveCellDown,
       updateViewName,
       updateAssertConfig,
-      toggleCellEnabled,
       runCellTests,
       updateCellMetadata,
       refreshVizData,
     }),
     [
-      cells,
-      selectedCellId,
-      runningCellIds,
-      queuedCellIds,
       addCell,
       updateCell,
       deleteCell,
@@ -591,24 +583,41 @@ export function CellProvider({ children }: { children: ReactNode }) {
       moveCellDown,
       updateViewName,
       updateAssertConfig,
-      toggleCellEnabled,
       runCellTests,
       updateCellMetadata,
       refreshVizData,
     ],
   );
 
-  return <CellContext.Provider value={contextValue}>{children}</CellContext.Provider>;
+  return (
+    <CellDataContext.Provider value={dataValue}>
+      <CellActionsContext.Provider value={actionsValue}>
+        {children}
+      </CellActionsContext.Provider>
+    </CellDataContext.Provider>
+  );
 }
 
 // ============================================================================
-// Hook
+// Hooks
 // ============================================================================
 
-export function useCells(): CellContextValue {
-  const context = useContext(CellContext);
+export function useCellData(): CellDataContextValue {
+  const context = useContext(CellDataContext);
   if (!context) {
-    throw new Error("useCells must be used within a CellProvider");
+    throw new Error("useCellData must be used within a CellProvider");
   }
   return context;
+}
+
+export function useCellActions(): CellActionsContextValue {
+  const context = useContext(CellActionsContext);
+  if (!context) {
+    throw new Error("useCellActions must be used within a CellProvider");
+  }
+  return context;
+}
+
+export function useCells() {
+  return { ...useCellData(), ...useCellActions() };
 }

@@ -150,63 +150,36 @@ export interface NotebookContextValue {
 }
 
 /**
- * Cell editing state and actions via useCells().
+ * Cell data (changes frequently — on every keystroke, selection, run).
  */
-export interface CellContextValue {
-  /** Cells in the active notebook */
+export interface CellDataContextValue {
   cells: NotebookCell[];
-
-  /** Currently selected cell ID */
   selectedCellId: string | null;
-
-  /** Set of cell IDs currently running */
   runningCellIds: Set<string>;
-
-  /** Set of cell IDs queued to run */
   queuedCellIds: Set<string>;
+}
 
-  /** Select a cell (or null to deselect) */
+/**
+ * Cell actions (stable — functions never change identity thanks to functional updaters).
+ */
+export interface CellActionsContextValue {
   selectCell: (id: string | null) => void;
-
-  /** Add a new cell */
   addCell: (type?: DataSprenCellType | "markdown", afterId?: string) => void;
-
-  /** Update cell source code */
   updateCell: (id: string, source: string) => void;
-
-  /** Delete a cell */
   deleteCell: (id: string) => void;
-
-  /** Run a cell */
   runCell: (id: string, queryOverride?: string) => Promise<void>;
-
-  /** Run a cell and advance selection to next cell */
   runCellAndAdvance: (id: string, queryOverride?: string) => void;
-
-  /** Change cell type (python, sql, assert, markdown) */
   changeCellType: (id: string, type: DataSprenCellType | "markdown") => void;
-
-  /** Move cell up in the list */
   moveCellUp: (id: string) => void;
-
-  /** Move cell down in the list */
   moveCellDown: (id: string) => void;
-
-  /** Update the view name for SQL cells */
   updateViewName: (id: string, newName: string) => void;
-
-  /** Update assert configuration for assert cells */
   updateAssertConfig: (id: string, config: { tests: AssertTest[] }) => void;
-
-  /** Toggle cell enabled state */
-  toggleCellEnabled: (id: string) => void;
-
-  /** Run only the tests for a cell (without re-executing the cell) */
   runCellTests: (id: string) => Promise<void>;
-
-  /** Update arbitrary cell metadata */
   updateCellMetadata: (id: string, metadata: Record<string, unknown>) => void;
-
-  /** Refresh visualization data for a cell (runs DuckDB query based on viz config) */
   refreshVizData: (id: string, configOverride?: VisualizeConfig) => Promise<void>;
 }
+
+/**
+ * Combined cell context (backward compat).
+ */
+export type CellContextValue = CellDataContextValue & CellActionsContextValue;
