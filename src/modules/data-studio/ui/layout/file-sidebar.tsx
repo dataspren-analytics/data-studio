@@ -1417,7 +1417,7 @@ function FileTreeContextMenuContent({
   }
 
   const ext = node.name.split(".").pop()?.toLowerCase();
-  const isExportable = ext === "csv" || ext === "parquet" || ext === "xlsx" || ext === "xls";
+  const isExportable = ext === "parquet" || ext === "xlsx" || ext === "xls";
   const exportFormats = getExportFormats(ext);
 
   return (
