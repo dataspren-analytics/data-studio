@@ -201,26 +201,13 @@ export function ResultTable({ tableData, totalRows, viewName, cellId, visibleRow
     const filename = `${viewName}.${format}`;
 
     try {
-      const selectSql = `SELECT * FROM ${escapeIdentifier(viewName)}${orderBy}`;
-      if (format === "csv") {
-        const code = [
-          `_export_sql = '${selectSql.replace(/\\/g, "\\\\").replace(/'/g, "\\'")}'`,
-          `_duckdb_conn.execute(f"COPY ({_export_sql}) TO '/tmp/_export.csv' (HEADER)")`,
-          `with open('/tmp/_export.csv', 'r') as _f:`,
-          `    print(_f.read(), end='')`,
-        ].join("\n");
-        const result = await runtime.runPython(code);
-        if (result.error) throw new Error(result.error);
-        downloadString(result.output, "text/csv", filename);
-      } else {
-        const code = [
-          `_export_rows = _duckdb_conn.execute('${selectSql.replace(/\\/g, "\\\\").replace(/'/g, "\\'")}').fetchdf()`,
-          `print(_export_rows.to_json(orient='records', date_format='iso'), end='')`,
-        ].join("\n");
-        const result = await runtime.runPython(code);
-        if (result.error) throw new Error(result.error);
-        downloadString(result.output, "application/json", filename);
-      }
+      const escapedSql = `SELECT * FROM ${escapeIdentifier(viewName)}${orderBy}`.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+      const serialize = format === "csv" ? "to_csv(index=False)" : "to_json(orient='records', date_format='iso')";
+      const mimeType = format === "csv" ? "text/csv" : "application/json";
+      const code = `_df = _duckdb_conn.execute('${escapedSql}').fetchdf()\nprint(_df.${serialize}, end='')`;
+      const result = await runtime.runPython(code);
+      if (result.error) throw new Error(result.error);
+      downloadString(result.output, mimeType, filename);
     } catch {
       downloadTableData(displayData, format, viewName || `query_${cellId}`);
     } finally {
