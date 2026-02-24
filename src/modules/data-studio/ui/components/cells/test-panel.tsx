@@ -11,7 +11,7 @@ import { sql as sqlLang } from "@codemirror/lang-sql";
 import { oneDark } from "@codemirror/theme-one-dark";
 import { EditorView } from "@codemirror/view";
 import CodeMirror from "@uiw/react-codemirror";
-import { ChevronDown, ChevronRight, Plus, Power, X } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, Plus, Power, X } from "lucide-react";
 import { useCallback, useState } from "react";
 import { assertTestTypeConfig, editorTheme, editorThemeDarkOverride } from "../../lib/constants";
 import { generateId } from "../../lib/utils";
@@ -21,7 +21,6 @@ import {
   type AssertTestType,
   type TableInfo,
 } from "../../../runtime";
-import { InlineSelect } from "../inline-select";
 import { CellExecutionIndicator } from "./cell-chrome";
 
 export interface TestPanelProps {
@@ -148,31 +147,49 @@ export function TestPanel({
                   </span>
                 )}
 
-                <InlineSelect
-                  value={test.type}
-                  options={(Object.keys(assertTestTypeConfig) as AssertTestType[]).map((type) => ({
-                    value: type,
-                    label: assertTestTypeConfig[type].label,
-                  }))}
-                  onValueChange={(value) =>
-                    updateTest(test.id, {
-                      type: value as AssertTestType,
-                      acceptedValues: value === "accepted_values" ? [] : undefined,
-                      customSQL: value === "custom_sql" ? "" : undefined,
-                    })
-                  }
-                />
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <button className="flex h-7 items-center gap-1 rounded-md border border-neutral-200 dark:border-border bg-transparent px-2 text-xs transition-colors outline-none focus-visible:ring-0">
+                      <span className="truncate">{assertTestTypeConfig[test.type].label}</span>
+                      <ChevronDown size={10} className="opacity-50 shrink-0" />
+                    </button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="start">
+                    {(Object.keys(assertTestTypeConfig) as AssertTestType[]).map((type) => (
+                      <DropdownMenuItem key={type} onClick={() =>
+                        updateTest(test.id, {
+                          type,
+                          acceptedValues: type === "accepted_values" ? [] : undefined,
+                          customSQL: type === "custom_sql" ? "" : undefined,
+                        })
+                      } className="text-xs">
+                        <span>{assertTestTypeConfig[type].label}</span>
+                        {test.type === type && <Check size={12} className="ml-auto" />}
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
 
                 {test.type !== "custom_sql" && (
-                  <InlineSelect
-                    value={test.columnName}
-                    options={columns.map((col) => ({
-                      value: col.name,
-                      label: col.name,
-                    }))}
-                    onValueChange={(value) => updateTest(test.id, { columnName: value })}
-                    placeholder="Column..."
-                  />
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <button className={cn(
+                        "flex h-7 items-center gap-1 rounded-md border border-neutral-200 dark:border-border bg-transparent px-2 text-xs transition-colors outline-none focus-visible:ring-0",
+                        !test.columnName && "text-muted-foreground",
+                      )}>
+                        <span className="truncate">{test.columnName || "Column..."}</span>
+                        <ChevronDown size={10} className="opacity-50 shrink-0" />
+                      </button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="start">
+                      {columns.map((col) => (
+                        <DropdownMenuItem key={col.name} onClick={() => updateTest(test.id, { columnName: col.name })} className="text-xs">
+                          <span>{col.name}</span>
+                          {test.columnName === col.name && <Check size={12} className="ml-auto" />}
+                        </DropdownMenuItem>
+                      ))}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                 )}
 
                 <div className="flex-1" />

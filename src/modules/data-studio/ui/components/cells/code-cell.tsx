@@ -156,8 +156,9 @@ export function CodeCell({
     return errorOutput?.output_type === "error" ? errorOutput.evalue : null;
   }, [cell.outputs]);
   const cellType = getCellType(cell.source);
-  const typeConfig = cellTypeConfig[cellType as SelectableCellType] ?? cellTypeConfig.python;
   const isSQL = cellType === "sql";
+
+  const typeConfig = cellTypeConfig[cellType as SelectableCellType] ?? cellTypeConfig.python;
   const hasOutput = cell.outputs.length > 0 || isQueued || isRunning;
   const showOutputArea = hasOutput || (isSQL && hasTests);
 
@@ -249,9 +250,7 @@ export function CodeCell({
                 >
                   <config.icon size={12} />
                   <span>{config.label}</span>
-                  {cellType === type && (
-                    <Check size={12} className="ml-auto" />
-                  )}
+                  {cellType === type && <Check size={12} className="ml-auto" />}
                 </DropdownMenuItem>
               );
             })}

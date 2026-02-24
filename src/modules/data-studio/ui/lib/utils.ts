@@ -8,6 +8,18 @@ export function generateId(): string {
   return Math.random().toString(36).substring(2, 9);
 }
 
+export function downloadString(content: string, mimeType: string, filename: string): void {
+  const blob = new Blob([content], { type: mimeType });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
 export function downloadTableData(
   tableData: TableData,
   format: "csv" | "json",
@@ -34,15 +46,7 @@ export function downloadTableData(
     mimeType = "application/json";
   }
 
-  const blob = new Blob([content], { type: mimeType });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `${filename}.${format}`;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
+  downloadString(content, mimeType, `${filename}.${format}`);
 }
 
 export function formatFileSize(bytes: number): string {

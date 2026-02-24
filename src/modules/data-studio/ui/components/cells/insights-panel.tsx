@@ -1,7 +1,13 @@
 "use client";
 
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
-import { BarChart3, LineChart, PieChart, ScatterChart, TrendingUp } from "lucide-react";
+import { BarChart3, Check, ChevronDown, LineChart, PieChart, ScatterChart, TrendingUp } from "lucide-react";
 import { useEffect, useMemo, useRef } from "react";
 import {
   type AggregationType,
@@ -9,7 +15,6 @@ import {
   type VisualizeChartType,
   type VisualizeConfig,
 } from "../../../runtime";
-import { InlineSelect } from "../inline-select";
 import { computeEffectiveVizConfig, computeNeedsAggregation } from "./viz-utils";
 
 // ─── EChart (lazy-loaded) ──────────────────────────────────────────────
@@ -297,44 +302,77 @@ export function InsightsPanel({ tableData, vizConfig, vizData, isDark, onUpdateV
         {/* X column */}
         <div className="flex items-center gap-1">
           <span className="text-[11px] font-medium text-neutral-500 dark:text-neutral-200">X</span>
-          <InlineSelect
-            value={effectiveVizConfig?.xColumn || tableColumns[0]}
-            options={tableColumns.map((col) => ({ value: col, label: col }))}
-            onValueChange={(col) => {
-              const updated = { ...(effectiveVizConfig || { chartType: "bar" as const, xColumn: "", yColumns: [] }), xColumn: col };
-              onUpdateVisualizeConfig?.(updated);
-              onRefreshVizData?.(updated);
-            }}
-          />
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button className="flex h-7 items-center gap-1 rounded-md border border-neutral-200 dark:border-border bg-transparent px-2 text-xs transition-colors outline-none focus-visible:ring-0">
+                <span className="truncate">{effectiveVizConfig?.xColumn || tableColumns[0]}</span>
+                <ChevronDown size={10} className="opacity-50 shrink-0" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start">
+              {tableColumns.map((col) => (
+                <DropdownMenuItem key={col} onClick={() => {
+                  const updated = { ...(effectiveVizConfig || { chartType: "bar" as const, xColumn: "", yColumns: [] }), xColumn: col };
+                  onUpdateVisualizeConfig?.(updated);
+                  onRefreshVizData?.(updated);
+                }} className="text-xs">
+                  <span>{col}</span>
+                  {(effectiveVizConfig?.xColumn || tableColumns[0]) === col && <Check size={12} className="ml-auto" />}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
 
         {/* Y column */}
         <div className="flex items-center gap-1">
           <span className="text-[11px] font-medium text-neutral-500 dark:text-neutral-200">Y</span>
-          <InlineSelect
-            value={effectiveVizConfig?.yColumns[0] || tableColumns[0]}
-            options={tableColumns.map((col) => ({ value: col, label: col }))}
-            onValueChange={(col) => {
-              const updated = { ...(effectiveVizConfig || { chartType: "bar" as const, xColumn: "", yColumns: [] }), yColumns: [col] };
-              onUpdateVisualizeConfig?.(updated);
-              onRefreshVizData?.(updated);
-            }}
-          />
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button className="flex h-7 items-center gap-1 rounded-md border border-neutral-200 dark:border-border bg-transparent px-2 text-xs transition-colors outline-none focus-visible:ring-0">
+                <span className="truncate">{effectiveVizConfig?.yColumns[0] || tableColumns[0]}</span>
+                <ChevronDown size={10} className="opacity-50 shrink-0" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start">
+              {tableColumns.map((col) => (
+                <DropdownMenuItem key={col} onClick={() => {
+                  const updated = { ...(effectiveVizConfig || { chartType: "bar" as const, xColumn: "", yColumns: [] }), yColumns: [col] };
+                  onUpdateVisualizeConfig?.(updated);
+                  onRefreshVizData?.(updated);
+                }} className="text-xs">
+                  <span>{col}</span>
+                  {(effectiveVizConfig?.yColumns[0] || tableColumns[0]) === col && <Check size={12} className="ml-auto" />}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
 
         {/* Aggregation */}
         {needsAggregation && (
           <div className="flex items-center gap-1">
             <span className="text-[11px] font-medium text-neutral-500 dark:text-neutral-200">Agg</span>
-            <InlineSelect
-              value={effectiveVizConfig?.aggregation || "sum"}
-              options={(Object.keys(aggregationLabels) as AggregationType[]).map((agg) => ({ value: agg, label: aggregationLabels[agg] }))}
-              onValueChange={(agg) => {
-                const updated = { ...(effectiveVizConfig || { chartType: "bar" as const, xColumn: "", yColumns: [] }), aggregation: agg as AggregationType };
-                onUpdateVisualizeConfig?.(updated);
-                onRefreshVizData?.(updated);
-              }}
-            />
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button className="flex h-7 items-center gap-1 rounded-md border border-neutral-200 dark:border-border bg-transparent px-2 text-xs transition-colors outline-none focus-visible:ring-0">
+                  <span className="truncate">{aggregationLabels[(effectiveVizConfig?.aggregation || "sum") as AggregationType]}</span>
+                  <ChevronDown size={10} className="opacity-50 shrink-0" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start">
+                {(Object.keys(aggregationLabels) as AggregationType[]).map((agg) => (
+                  <DropdownMenuItem key={agg} onClick={() => {
+                    const updated = { ...(effectiveVizConfig || { chartType: "bar" as const, xColumn: "", yColumns: [] }), aggregation: agg as AggregationType };
+                    onUpdateVisualizeConfig?.(updated);
+                    onRefreshVizData?.(updated);
+                  }} className="text-xs">
+                    <span>{aggregationLabels[agg]}</span>
+                    {(effectiveVizConfig?.aggregation || "sum") === agg && <Check size={12} className="ml-auto" />}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         )}
 
