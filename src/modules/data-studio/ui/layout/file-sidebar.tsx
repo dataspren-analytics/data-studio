@@ -1073,10 +1073,8 @@ base64.b64encode(content).decode('utf-8')
               node={fileTree}
               depth={0}
               expandedPaths={expandedPaths}
-              onToggle={toggleExpanded}
               onDeleteFile={onDeleteFile}
               onCopyPath={handleCopyPath}
-              onOpenFile={onOpenFile}
               activeNotebookPath={showHome ? null : activeFilePath}
               onDuplicateFile={handleDuplicateFile}
               onDownloadFile={handleDownloadFile}
@@ -1158,11 +1156,8 @@ interface FileTreeNodeProps {
   node: FileTreeNode;
   depth: number;
   expandedPaths: Set<string>;
-  onToggle: (path: string) => void;
   onDeleteFile: (path: string) => Promise<boolean>;
   onCopyPath: (path: string) => void;
-  // File opening
-  onOpenFile: (path: string) => Promise<void>;
   activeNotebookPath: string | null;
   onDuplicateFile: (path: string) => Promise<void>;
   onDownloadFile: (name: string) => Promise<void>;
@@ -1195,10 +1190,8 @@ function FileTreeNodeComponent({
   node,
   depth,
   expandedPaths,
-  onToggle,
   onDeleteFile,
   onCopyPath,
-  onOpenFile,
   activeNotebookPath,
   onDuplicateFile,
   onDownloadFile,
@@ -1385,10 +1378,8 @@ function FileTreeNodeComponent({
             node={child}
             depth={depth + 1}
             expandedPaths={expandedPaths}
-            onToggle={onToggle}
             onDeleteFile={onDeleteFile}
             onCopyPath={onCopyPath}
-            onOpenFile={onOpenFile}
             activeNotebookPath={activeNotebookPath}
             onDuplicateFile={onDuplicateFile}
             onDownloadFile={onDownloadFile}
@@ -1488,8 +1479,7 @@ function FileTreeContextMenuContent({
 
   // Bulk menu when multiple items are selected
   if (selectedPaths.size > 1) {
-    const count = selectedPaths.size;
-    const label = count > 1 ? `${count} items` : `${count} item`;
+    const label = `${selectedPaths.size} items`;
     return (
       <DropdownMenuContent align="start" className="w-44">
         <DropdownMenuItem
