@@ -245,6 +245,14 @@ export function FileSidebar({ onCreateNotebook: onCreateNotebookProp, showHome, 
   const [editingName, setEditingName] = useState("");
   const editInputRef = useRef<HTMLInputElement>(null);
 
+  // Multi-selection state
+  const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set());
+  const [lastSelectedPath, setLastSelectedPath] = useState<string | null>(null);
+  const clearSelection = useCallback(() => {
+    setSelectedPaths(new Set());
+    setLastSelectedPath(null);
+  }, []);
+
   // DnD state
   const [draggedNode, setDraggedNode] = useState<FileTreeNode | null>(null);
   const [dropTargetDir, setDropTargetDir] = useState<DropTargetDir>(null);
@@ -258,12 +266,19 @@ export function FileSidebar({ onCreateNotebook: onCreateNotebookProp, showHome, 
   const [transferring, setTransferring] = useState<{ fileName: string; targetDir: string; sourcePath: string } | null>(null);
 
   // Shared context menu state (positioned at cursor, key forces remount)
-  const [contextMenu, setContextMenu] = useState<{ node: FileTreeNode; x: number; y: number; key: number } | null>(null);
+  const [contextMenu, setContextMenu] = useState<{ node: FileTreeNode; x: number; y: number; key: number; selectedPaths: Set<string> } | null>(null);
   const contextKeyRef = useRef(0);
   const handleNodeContextMenu = useCallback((node: FileTreeNode, x: number, y: number) => {
     contextKeyRef.current++;
-    setContextMenu({ node, x, y, key: contextKeyRef.current });
-  }, []);
+    // If right-clicking a node that's in the current selection, keep it; otherwise clear
+    const snapshotSelection = selectedPaths.has(node.path)
+      ? selectedPaths
+      : new Set<string>();
+    if (!snapshotSelection.size) {
+      clearSelection();
+    }
+    setContextMenu({ node, x, y, key: contextKeyRef.current, selectedPaths: snapshotSelection });
+  }, [selectedPaths, clearSelection]);
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -300,19 +315,33 @@ export function FileSidebar({ onCreateNotebook: onCreateNotebookProp, showHome, 
     return map;
   }, [fileTree]);
 
+  // Flat list of visible node paths in render order (files + directories) — for shift-click ranges
+  const flatVisibleNodes = useMemo(() => {
+    const result: string[] = [];
+    function walk(node: FileTreeNode) {
+      // Skip the invisible root node (/mnt)
+      if (node.path !== "/mnt") result.push(node.path);
+      if (node.isDirectory && node.children && expandedPaths.has(node.path))
+        for (const child of node.children) walk(child);
+    }
+    walk(fileTree);
+    return result;
+  }, [fileTree, expandedPaths]);
+
   const handleDragStart = useCallback((event: DragStartEvent) => {
+    clearSelection();
     const node = event.active.data.current?.node as FileTreeNode | undefined;
     // Extract path from the drag ID (format: "drag:/path/to/file")
     const dragId = String(event.active.id);
     const path = dragId.startsWith("drag:") ? dragId.slice(5) : dragId;
     const fallbackNode = nodeMap.get(path);
     const sourceNode = node || fallbackNode;
-    
+
     // Files (including notebooks) can be dragged, but not directories
     if (sourceNode && !sourceNode.isDirectory) {
       setDraggedNode(sourceNode);
     }
-  }, [nodeMap]);
+  }, [nodeMap, clearSelection]);
 
   const handleDragEnd = useCallback(async (event: DragEndEvent) => {
     const targetDir = dropTargetDirRef.current;
@@ -438,9 +467,10 @@ export function FileSidebar({ onCreateNotebook: onCreateNotebookProp, showHome, 
   }, [editingPath]);
 
   const handleStartRename = useCallback((path: string, currentName: string) => {
+    clearSelection();
     setEditingPath(path);
     setEditingName(currentName);
-  }, []);
+  }, [clearSelection]);
 
   // Use refs to capture current values for the blur handler
   const editingPathRef = useRef(editingPath);
@@ -832,6 +862,81 @@ base64.b64encode(content).decode('utf-8')
     navigator.clipboard.writeText(path);
   }, []);
 
+  // Multi-selection callbacks
+  const handleNodeSelect = useCallback((path: string, isDirectory: boolean, modifiers: { shiftKey: boolean; metaKey: boolean; ctrlKey: boolean }) => {
+    if (modifiers.shiftKey && lastSelectedPath) {
+      const anchorIdx = flatVisibleNodes.indexOf(lastSelectedPath);
+      const targetIdx = flatVisibleNodes.indexOf(path);
+      if (anchorIdx !== -1 && targetIdx !== -1) {
+        const start = Math.min(anchorIdx, targetIdx);
+        const end = Math.max(anchorIdx, targetIdx);
+        setSelectedPaths(new Set(flatVisibleNodes.slice(start, end + 1)));
+        return;
+      }
+      // anchor or target not visible — fall through to plain click
+    }
+
+    if (modifiers.metaKey || modifiers.ctrlKey) {
+      setSelectedPaths((prev) => {
+        const next = new Set(prev);
+        if (next.has(path)) next.delete(path);
+        else next.add(path);
+        return next;
+      });
+      setLastSelectedPath(path);
+      return;
+    }
+
+    // Plain click — clear selection, set anchor
+    clearSelection();
+    setLastSelectedPath(path);
+    if (isDirectory) {
+      toggleExpanded(path);
+    } else {
+      onOpenFile(path);
+    }
+  }, [lastSelectedPath, flatVisibleNodes, clearSelection, onOpenFile, toggleExpanded]);
+
+  const handleBulkDelete = useCallback(async (paths: Set<string>) => {
+    const count = paths.size;
+    if (!confirm(`Delete ${count} item${count > 1 ? "s" : ""}?`)) return;
+    // Delete deepest paths first so child files are removed before their parent directories
+    const sorted = [...paths].sort((a, b) => b.split("/").length - a.split("/").length);
+    for (const p of sorted) {
+      const node = nodeMap.get(p);
+      if (node?.isDirectory) {
+        await onDeleteDirectory(p);
+      } else {
+        await onDeleteFile(p);
+      }
+    }
+    clearSelection();
+  }, [onDeleteFile, onDeleteDirectory, nodeMap, clearSelection]);
+
+  const handleBulkDownload = useCallback(async (paths: Set<string>) => {
+    for (const p of paths) {
+      const node = nodeMap.get(p);
+      if (node?.isDirectory) continue; // skip directories
+      await handleDownloadFile(p);
+    }
+  }, [handleDownloadFile, nodeMap]);
+
+  // Delete key triggers bulk delete when items are selected
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (selectedPaths.size === 0) return;
+      if (e.key === "Delete" || e.key === "Backspace") {
+        // Don't trigger while renaming or typing in an input
+        const tag = (e.target as HTMLElement)?.tagName;
+        if (tag === "INPUT" || tag === "TEXTAREA") return;
+        e.preventDefault();
+        handleBulkDelete(selectedPaths);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [selectedPaths, handleBulkDelete]);
+
   // ---- Resize handle logic ----
   const [sidebarWidth, setSidebarWidth] = useState(224); // 224px = w-56
 
@@ -963,7 +1068,7 @@ base64.b64encode(content).decode('utf-8')
         onDragMove={handleDragMove}
       >
         <ScrollArea className="flex-1 min-h-0">
-          <div className="py-1">
+          <div className="py-1" onClick={clearSelection}>
             <FileTreeNodeComponent
               node={fileTree}
               depth={0}
@@ -990,6 +1095,8 @@ base64.b64encode(content).decode('utf-8')
               externalDropTargetDir={externalDropTargetDir}
               transferring={transferring}
               onNodeContextMenu={handleNodeContextMenu}
+              selectedPaths={selectedPaths}
+              onNodeSelect={handleNodeSelect}
             />
           </div>
         </ScrollArea>
@@ -1009,6 +1116,9 @@ base64.b64encode(content).decode('utf-8')
               onExportFile={handleExportFile}
               onCopyPath={handleCopyPath}
               onDeleteFile={onDeleteFile}
+              selectedPaths={contextMenu.selectedPaths}
+              onBulkDelete={handleBulkDelete}
+              onBulkDownload={handleBulkDownload}
             />
           </DropdownMenu>
         )}
@@ -1076,6 +1186,9 @@ interface FileTreeNodeProps {
   transferring: { fileName: string; targetDir: string; sourcePath: string } | null;
   // Context menu
   onNodeContextMenu: (node: FileTreeNode, x: number, y: number) => void;
+  // Multi-selection
+  selectedPaths: Set<string>;
+  onNodeSelect: (path: string, isDirectory: boolean, modifiers: { shiftKey: boolean; metaKey: boolean; ctrlKey: boolean }) => void;
 }
 
 function FileTreeNodeComponent({
@@ -1104,6 +1217,8 @@ function FileTreeNodeComponent({
   externalDropTargetDir,
   transferring,
   onNodeContextMenu,
+  selectedPaths,
+  onNodeSelect,
 }: FileTreeNodeProps) {
   const isExpanded = expandedPaths.has(node.path);
   const isActiveFile = !node.isDirectory && node.path === activeNotebookPath;
@@ -1148,12 +1263,8 @@ function FileTreeNodeComponent({
 
   const handleClick = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
-    if (node.isDirectory) {
-      onToggle(node.path);
-    } else {
-      onOpenFile(node.path);
-    }
-  }, [node.isDirectory, node.path, onToggle, onOpenFile]);
+    onNodeSelect(node.path, node.isDirectory, { shiftKey: e.shiftKey, metaKey: e.metaKey, ctrlKey: e.ctrlKey });
+  }, [node.isDirectory, node.path, onNodeSelect]);
 
   const handleContextMenu = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
@@ -1178,6 +1289,7 @@ function FileTreeNodeComponent({
           "group flex items-center gap-1 pr-1 py-0.5 text-xs transition-colors select-none min-w-0",
           "hover:bg-neutral-100 dark:hover:bg-accent",
           isActiveFile && "bg-neutral-100 dark:bg-sidebar-accent",
+          selectedPaths.has(node.path) && !isActiveFile && "bg-blue-50 dark:bg-blue-900/20",
           isThisDragging && "opacity-30",
           isBeingTransferred && "opacity-0 h-0 py-0 overflow-hidden",
           canDrag && "touch-none"
@@ -1295,6 +1407,8 @@ function FileTreeNodeComponent({
             externalDropTargetDir={externalDropTargetDir}
             transferring={transferring}
             onNodeContextMenu={onNodeContextMenu}
+            selectedPaths={selectedPaths}
+            onNodeSelect={onNodeSelect}
           />
         );
 
@@ -1351,6 +1465,9 @@ interface FileTreeContextMenuContentProps {
   onExportFile: (path: string, format: "csv" | "json" | "parquet" | "xlsx") => Promise<void>;
   onCopyPath: (path: string) => void;
   onDeleteFile: (path: string) => Promise<boolean>;
+  selectedPaths: Set<string>;
+  onBulkDelete: (paths: Set<string>) => Promise<void>;
+  onBulkDownload: (paths: Set<string>) => Promise<void>;
 }
 
 function FileTreeContextMenuContent({
@@ -1363,8 +1480,36 @@ function FileTreeContextMenuContent({
   onExportFile,
   onCopyPath,
   onDeleteFile,
+  selectedPaths,
+  onBulkDelete,
+  onBulkDownload,
 }: FileTreeContextMenuContentProps) {
   if (!node) return null;
+
+  // Bulk menu when multiple items are selected
+  if (selectedPaths.size > 1) {
+    const count = selectedPaths.size;
+    const label = count > 1 ? `${count} items` : `${count} item`;
+    return (
+      <DropdownMenuContent align="start" className="w-44">
+        <DropdownMenuItem
+          onClick={() => onBulkDownload(selectedPaths)}
+          className="text-xs"
+        >
+          <Download size={12} className="mr-2" />
+          Download {label}
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem
+          onClick={() => onBulkDelete(selectedPaths)}
+          className="text-xs text-red-600 dark:text-red-400"
+        >
+          <Trash2 size={12} className="mr-2" />
+          Delete {label}
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    );
+  }
 
   if (node.isDirectory) {
     const isRootLocalDir = node.path === "/mnt/local";
