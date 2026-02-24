@@ -37,17 +37,17 @@ import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import {
-  Csv as CarbonCsv,
-  DataTable as CarbonDataTable,
-  Document as CarbonDocument,
-  DocumentBlank as CarbonDocumentBlank,
-  Folder as CarbonFolder,
-  FolderAdd as CarbonFolderAdd,
-  FolderOpen as CarbonFolderOpen,
-  Json as CarbonJson,
-  Notebook as CarbonNotebook,
-  Txt as CarbonTxt,
-  Xls as CarbonXls,
+  Csv,
+  DataTable,
+  Document,
+  DocumentBlank,
+  FolderAdd,
+  Json,
+  LogoJupyter,
+  Txt,
+  Xls,
+  Sql,
+  DeliveryParcel,
 } from "@carbon/icons-react";
 import {
   ChevronLeft,
@@ -64,7 +64,6 @@ import {
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { FileInfo, NotebookCell } from "../../runtime";
 import { ResizablePanel } from "../components/resizable-panel";
-import type { NotebookEntry } from "../lib/types";
 import { formatFileSize } from "../lib/utils";
 import { useNotebook, useRuntime } from "../provider";
 
@@ -185,16 +184,16 @@ function FileIconForName({ name, size, className }: { name: string; size: number
   const ext = name.split(".").pop()?.toLowerCase();
   let icon;
   switch (ext) {
-    case "ipynb": icon = <CarbonNotebook size={size} />; break;
-    case "csv": icon = <CarbonCsv size={size} />; break;
-    case "parquet": icon = <CarbonDataTable size={size} />; break;
+    case "ipynb": icon = <LogoJupyter size={size} color="var(--color-orange-400)" />; break;
+    case "csv": icon = <Csv size={size} color="var(--color-green-400)" />; break;
+    case "parquet": icon = <DeliveryParcel size={size} color="var(--color-amber-700)" />; break;
     case "xlsx":
-    case "xls": icon = <CarbonXls size={size} />; break;
-    case "json": icon = <CarbonJson size={size} />; break;
-    case "txt": icon = <CarbonTxt size={size} />; break;
-    case "md": icon = <CarbonDocument size={size} />; break;
-    case "sql": icon = <CarbonDocumentBlank size={size} />; break;
-    default: icon = <CarbonDocumentBlank size={size} />; break;
+    case "xls": icon = <Xls size={size} color="var(--color-emerald-500)" />; break;
+    case "json": icon = <Json size={size} color="var(--color-yellow-400)" />; break;
+    case "txt": icon = <Txt size={size} color="var(--color-zinc-400)" />; break;
+    case "md": icon = <Document size={size} color="var(--color-blue-400)" />; break;
+    case "sql": icon = <Sql size={size} color="var(--color-sky-400)" />; break;
+    default: icon = <DocumentBlank size={size} />; break;
   }
   return <span className={className}>{icon}</span>;
 }
@@ -206,8 +205,6 @@ export function FileSidebar({ onCreateNotebook: onCreateNotebookProp, showHome, 
     selectFile,
     openFile,
     createNotebook,
-    renameNotebook: onRenameNotebook,
-    exportNotebook: onExportNotebook,
     reloadNotebooks,
   } = useNotebook();
   const onSelectFile = onSelectFileProp ?? selectFile;
@@ -875,7 +872,7 @@ base64.b64encode(content).decode('utf-8')
               )}
               title={notebook.name}
             >
-              <CarbonNotebook size={14} />
+              <LogoJupyter size={14} />
             </button>
           ))}
         </div>
@@ -928,20 +925,20 @@ base64.b64encode(content).decode('utf-8')
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start" className="w-40 min-w-0">
               <DropdownMenuItem onClick={() => onCreateNotebook()} className="text-xs py-1.5">
-                <CarbonNotebook size={12} />
+                <LogoJupyter size={12} />
                 <span>Notebook</span>
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem onClick={() => handleCreateTextFile("md")} className="text-xs py-1.5">
-                <CarbonDocument size={12} />
+                <Document size={12} />
                 <span>Markdown (.md)</span>
               </DropdownMenuItem>
               <DropdownMenuItem onClick={() => handleCreateTextFile("txt")} className="text-xs py-1.5">
-                <CarbonTxt size={12} />
+                <Txt size={12} />
                 <span>Text file (.txt)</span>
               </DropdownMenuItem>
               <DropdownMenuItem onClick={handleCreateSqlFile} className="text-xs py-1.5">
-                <CarbonDocumentBlank size={12} />
+                <DocumentBlank size={12} />
                 <span>SQL file (.sql)</span>
               </DropdownMenuItem>
             </DropdownMenuContent>
@@ -1113,9 +1110,6 @@ function FileTreeNodeComponent({
   const isEditing = node.path === editingPath;
   const isBeingTransferred = transferring?.sourcePath === node.path;
 
-  const isRootLocalDir = node.path === "/mnt/local";
-  const canDeleteDirectory = node.isDirectory && !isRootLocalDir && node.path !== "/mnt";
-
   // Files (including notebooks) can be dragged, but not directories
   const canDrag = !node.isDirectory;
 
@@ -1198,24 +1192,16 @@ function FileTreeNodeComponent({
           <ChevronRight
             size={12}
             className={cn(
-              "text-neutral-400 transition-transform shrink-0",
+              "text-neutral-400 shrink-0",
               isExpanded && "rotate-90"
             )}
           />
         )}
 
-        {node.isDirectory ? (
-          isExpanded ? (
-            <span className="shrink-0 text-neutral-300"><CarbonFolderOpen size={12} /></span>
-          ) : (
-            <span className="shrink-0 text-neutral-300"><CarbonFolder size={12} /></span>
-          )
-        ) : (
-          <FileIconForName name={node.name} size={12} className={cn(
+        {!node.isDirectory && <FileIconForName name={node.name} size={12} className={cn(
             "shrink-0",
             isActiveFile ? "text-brand" : "text-neutral-500"
-          )} />
-        )}
+          )} />}
 
         {isEditing ? (
           <Input
@@ -1343,13 +1329,13 @@ function getExportFormats(ext: string | undefined) {
   const formats: Array<{ format: "csv" | "json" | "parquet" | "xlsx"; label: string; icon: React.ComponentType<{ size?: number }> }> = [];
   if (ext === "csv") {
     formats.push(
-      { format: "json", label: "JSON", icon: CarbonJson },
-      { format: "parquet", label: "Parquet", icon: CarbonDataTable },
+      { format: "json", label: "JSON", icon: Json },
+      { format: "parquet", label: "Parquet", icon: DataTable },
     );
   } else if (ext === "parquet") {
     formats.push(
-      { format: "csv", label: "CSV", icon: CarbonCsv },
-      { format: "json", label: "JSON", icon: CarbonJson },
+      { format: "csv", label: "CSV", icon: Csv },
+      { format: "json", label: "JSON", icon: Json },
     );
   }
   return formats;
@@ -1390,7 +1376,7 @@ function FileTreeContextMenuContent({
           onClick={() => onCreateDirectory(node.path)}
           className="text-xs"
         >
-          <span className="mr-2"><CarbonFolderAdd size={12} /></span>
+          <span className="mr-2"><FolderAdd size={12} /></span>
           New folder
         </DropdownMenuItem>
         {canDelete && (
