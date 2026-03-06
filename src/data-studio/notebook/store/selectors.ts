@@ -9,6 +9,7 @@ export const selectCellIds = (s: NotebookState) => s.cellIds;
 export const selectSelectedCellId = (s: NotebookState) => s.selectedCellId;
 export const selectRunningCellIds = (s: NotebookState) => s.runningCellIds;
 export const selectQueuedCellIds = (s: NotebookState) => s.queuedCellIds;
+export const selectIsRunningAll = (s: NotebookState) => s.isRunningAll;
 export const selectIsDarkMode = (s: NotebookState) => s.isDarkMode;
 
 // ============================================================================
@@ -25,6 +26,8 @@ export const selectMoveCellUp = (s: NotebookState) => s.moveCellUp;
 export const selectMoveCellDown = (s: NotebookState) => s.moveCellDown;
 export const selectUpdateViewName = (s: NotebookState) => s.updateViewName;
 export const selectUpdateAssertConfig = (s: NotebookState) => s.updateAssertConfig;
+export const selectRunAllCells = (s: NotebookState) => s.runAllCells;
+export const selectStopAllCells = (s: NotebookState) => s.stopAllCells;
 export const selectRunCellTests = (s: NotebookState) => s.runCellTests;
 export const selectUpdateCellMetadata = (s: NotebookState) => s.updateCellMetadata;
 export const selectRefreshVizData = (s: NotebookState) => s.refreshVizData;

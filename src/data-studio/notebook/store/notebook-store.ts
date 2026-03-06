@@ -47,6 +47,7 @@ export function createNotebookStore(
 ) {
   let nextViewNumber = 3;
   let persistTimer: ReturnType<typeof setTimeout> | undefined;
+  let runAllAbort: AbortController | undefined;
 
   function schedulePersist(getCells: () => NotebookCell[]) {
     clearTimeout(persistTimer);
@@ -261,6 +262,31 @@ export function createNotebookStore(
         document.activeElement.blur();
       }
       get().runCell(id, queryOverride);
+    },
+
+    runAllCells: async () => {
+      runAllAbort?.abort();
+      const abort = new AbortController();
+      runAllAbort = abort;
+      set({ isRunningAll: true });
+
+      const codeCellIds = get().cells.filter(isCodeCell).map((c) => c.id);
+
+      for (const id of codeCellIds) {
+        if (abort.signal.aborted) break;
+        await get().runCell(id);
+      }
+
+      if (!abort.signal.aborted) {
+        runAllAbort = undefined;
+      }
+      set({ isRunningAll: false });
+    },
+
+    stopAllCells: () => {
+      runAllAbort?.abort();
+      runAllAbort = undefined;
+      set({ isRunningAll: false });
     },
 
     runCellTests: async (id) => {

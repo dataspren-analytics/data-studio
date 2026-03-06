@@ -10,6 +10,7 @@ export function getInitialState(cells: NotebookCell[]): NotebookStore {
     selectedCellId: cells[0]?.id ?? null,
     runningCellIds: new Set(),
     queuedCellIds: new Set(),
+    isRunningAll: false,
     isDarkMode: true,
   };
 }

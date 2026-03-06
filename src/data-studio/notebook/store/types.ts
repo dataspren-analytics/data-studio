@@ -17,6 +17,7 @@ export interface NotebookStore {
   selectedCellId: string | null;
   runningCellIds: Set<string>;
   queuedCellIds: Set<string>;
+  isRunningAll: boolean;
 
   /** External config synced from parent (via StoreUpdater pattern) */
   isDarkMode: boolean;
@@ -38,6 +39,8 @@ export interface NotebookActions {
   moveCellDown: (id: string) => void;
   updateViewName: (id: string, newName: string) => void;
   updateAssertConfig: (id: string, config: { tests: AssertTest[] }) => void;
+  runAllCells: () => Promise<void>;
+  stopAllCells: () => void;
   runCellTests: (id: string) => Promise<void>;
   updateCellMetadata: (id: string, metadata: Record<string, unknown>) => void;
   refreshVizData: (id: string, configOverride?: VisualizeConfig) => Promise<void>;
