@@ -19,6 +19,8 @@ export function useCellActions(): NotebookActions {
       moveCellDown: s.moveCellDown,
       updateViewName: s.updateViewName,
       updateAssertConfig: s.updateAssertConfig,
+      runAllCells: s.runAllCells,
+      stopAllCells: s.stopAllCells,
       runCellTests: s.runCellTests,
       updateCellMetadata: s.updateCellMetadata,
       refreshVizData: s.refreshVizData,
