@@ -6,102 +6,52 @@ import {
   useContext,
   useEffect,
   useMemo,
-  useRef,
   useState,
   type ReactNode,
 } from "react";
 import type {
   ExecutionResult,
-  ExecutionStatus,
   FileInfo,
   IExecutionBackend,
   PythonVariable,
-  RegisteredFile,
   RegisteredFunction,
   TableInfo,
 } from "../runtime";
-import { getRelativePath } from "../runtime/notebook-utils";
-import { listOPFSFiles } from "../runtime/opfs-list";
-
-/**
- * Runtime state exposed to components via useRuntime().
- * Hides execution service implementation details.
- */
-export interface RuntimeContextValue {
-  /** Whether the execution runtime is ready to run code */
-  isReady: boolean;
-
-  /** Whether the runtime is currently loading */
-  isLoading: boolean;
-
-  /** Fatal error message (e.g. worker crash) */
-  error: string | null;
-
-  /** S3 storage mount status */
-  s3Status: "idle" | "mounting" | "ready" | "error";
-
-  /** Files in the global data directory */
-  dataFiles: FileInfo[];
-
-  /** Files registered in the runtime (with schema info) */
-  registeredFiles: RegisteredFile[];
-
-  /** Tables available in the runtime (from DuckDB) */
-  tables: TableInfo[];
-
-  /** Python functions defined in the runtime */
-  functions: RegisteredFunction[];
-
-  /** Python variables in the runtime */
-  variables: PythonVariable[];
-
-  /** Write a file to the global data directory (or a specific directory if targetDir is provided) */
-  writeFile: (file: File, targetDir?: string) => Promise<void>;
-
-  /** Read a file from the global data directory */
-  readFile: (name: string) => Promise<Uint8Array>;
-
-  /** Delete a file from the global data directory */
-  deleteFile: (name: string) => Promise<boolean>;
-
-  /** Create a directory in the global data directory */
-  createDirectory: (path: string) => Promise<void>;
-
-  /** Delete a directory from the global data directory */
-  deleteDirectory: (path: string) => Promise<boolean>;
-
-  /** Rename a directory in the global data directory */
-  renameDirectory: (oldPath: string, newName: string) => Promise<void>;
-
-  /** Move a file to a different directory */
-  moveFile: (sourcePath: string, targetDir: string) => Promise<void>;
-
-  /** Rename a file */
-  renameFile: (path: string, newName: string) => Promise<void>;
-
-  /** Execute a SQL query via DuckDB */
-  runSQL: (sql: string, viewName?: string) => Promise<ExecutionResult>;
-
-  /** Execute Python code via Pyodide */
-  runPython: (code: string) => Promise<ExecutionResult>;
-
-  /** Refresh the tables list from DuckDB */
-  refreshTables: () => Promise<void>;
-
-  /** Refresh the functions list */
-  refreshFunctions: () => Promise<void>;
-
-  /** Refresh the variables list */
-  refreshVariables: () => Promise<void>;
-
-  /** Refresh the data files list */
-  refreshFiles: () => Promise<void>;
-
-  /** Reset the runtime (clear all state) */
-  reset: () => Promise<void>;
-
-}
+import { toRelativePath, toOPFSPath } from "../lib/paths";
+import { listOPFSFiles, readOPFSFile, writeOPFSFile } from "../runtime/opfs-list";
 import { Button } from "@/components/ui/button";
+import { useWebLock } from "./hooks/use-web-lock";
+import { useExecutionStatus } from "./hooks/use-execution-status";
+import { useBroadcastFileSync } from "./hooks/use-broadcast-file-sync";
+import { useEarlyOPFSLoad } from "./hooks/use-early-opfs-load";
+import { useAutoInit } from "./hooks/use-auto-init";
+
+export interface RuntimeContextValue {
+  isReady: boolean;
+  isLoading: boolean;
+  error: string | null;
+  s3Status: "idle" | "mounting" | "ready" | "error";
+  dataFiles: FileInfo[];
+  tables: TableInfo[];
+  functions: RegisteredFunction[];
+  variables: PythonVariable[];
+  writeFile: (file: File, targetDir?: string) => Promise<void>;
+  readFile: (name: string) => Promise<Uint8Array>;
+  deleteFile: (name: string) => Promise<boolean>;
+  createDirectory: (path: string) => Promise<void>;
+  deleteDirectory: (path: string) => Promise<boolean>;
+  renameDirectory: (oldPath: string, newName: string) => Promise<void>;
+  moveFile: (sourcePath: string, targetDir: string) => Promise<void>;
+  renameFile: (path: string, newName: string) => Promise<void>;
+  runSQL: (sql: string, viewName?: string) => Promise<ExecutionResult>;
+  runPython: (code: string) => Promise<ExecutionResult>;
+  convertFile: (filePath: string, targetFormat: string) => Promise<Uint8Array>;
+  refreshTables: () => Promise<void>;
+  refreshFunctions: () => Promise<void>;
+  refreshVariables: () => Promise<void>;
+  refreshFiles: () => Promise<void>;
+  reset: () => Promise<void>;
+}
 
 const RuntimeContext = createContext<RuntimeContextValue | null>(null);
 const ExecutionBackendContext = createContext<IExecutionBackend | null>(null);
@@ -115,136 +65,23 @@ interface RuntimeProviderProps {
 }
 
 export function RuntimeProvider({ execution, autoInit = true, children }: RuntimeProviderProps) {
-  const [tabBlocked, setTabBlocked] = useState(false);
+  const { tabBlocked } = useWebLock(TAB_LOCK_NAME);
+  const { executionStatus, dataFiles, setDataFiles } = useExecutionStatus(execution);
 
-  // Acquire an exclusive Web Lock so only one tab can use the OPFS-backed
-  // runtime at a time.  If another tab already holds the lock we show a
-  // blocking dialog instead of initialising (which would crash on
-  // createSyncAccessHandle).
-  useEffect(() => {
-    let released = false;
-
-    navigator.locks.request(
-      TAB_LOCK_NAME,
-      { ifAvailable: true },
-      (lock) => {
-        if (released) return;
-        if (!lock) {
-          // Another tab holds the lock.
-          setTabBlocked(true);
-          return;
-        }
-        // Lock acquired – hold it for the lifetime of this tab by returning
-        // a promise that only resolves on cleanup.
-        setTabBlocked(false);
-        return new Promise<void>((resolve) => {
-          // Store resolve so we can release the lock on unmount.
-          releaseRef.current = resolve;
-        });
-      },
-    );
-
-    return () => {
-      released = true;
-      releaseRef.current?.();
-      releaseRef.current = null;
-    };
-  }, []);
-
-  const releaseRef = useRef<(() => void) | null>(null);
-
-  const [executionStatus, setExecutionStatus] = useState<ExecutionStatus>(() => execution.status);
-  const [dataFiles, setDataFiles] = useState<import("../runtime").FileInfo[]>([]);
   const [tables, setTables] = useState<TableInfo[]>([]);
   const [functions, setFunctions] = useState<RegisteredFunction[]>([]);
   const [variables, setVariables] = useState<PythonVariable[]>([]);
 
-  // Subscribe to execution backend events
-  useEffect(() => {
-    const unsub = execution.onChange((event) => {
-      switch (event.type) {
-        case "status":
-          setExecutionStatus(event.data);
-          break;
-        case "files":
-          setDataFiles(event.data);
-          break;
-      }
-    });
-    return unsub;
-  }, [execution]);
-
-  // Cross-tab file change notifications via BroadcastChannel.
-  // When this tab mutates files, it broadcasts so other tabs can refresh.
-  // When another tab broadcasts, this tab refreshes its file list.
-  const fileChannelRef = useRef<BroadcastChannel | null>(null);
-  useEffect(() => {
-    const channel = new BroadcastChannel("data-studio-files");
-    fileChannelRef.current = channel;
-    channel.onmessage = () => {
+  const { broadcastFileChange } = useBroadcastFileSync(
+    "data-studio-files",
+    useCallback(() => {
       execution.listFiles().then(setDataFiles);
-    };
-    return () => {
-      channel.close();
-      fileChannelRef.current = null;
-    };
-  }, [execution]);
+    }, [execution, setDataFiles]),
+  );
 
-  // Convert FileInfo to RegisteredFile for UI display
-  const registeredFiles = useMemo<RegisteredFile[]>(() => {
-    return dataFiles.map((dataFile) => {
-      const ext = dataFile.name.split(".").pop()?.toLowerCase();
-      const fileType = (ext === "csv" || ext === "parquet" || ext === "json") ? ext : "csv";
-      return {
-        name: dataFile.name,
-        path: dataFile.path,
-        size: dataFile.size,
-        type: fileType as "csv" | "parquet" | "json",
-      };
-    });
-  }, [dataFiles]);
+  useEarlyOPFSLoad(setDataFiles);
+  useAutoInit(execution, autoInit);
 
-  // Early file listing: read OPFS directly from the main thread so the
-  // file tree is visible before the Pyodide worker finishes initializing.
-  const earlyLoadDoneRef = useRef(false);
-  useEffect(() => {
-    if (earlyLoadDoneRef.current) return;
-    earlyLoadDoneRef.current = true;
-    listOPFSFiles().then((files) => {
-      if (files.length > 0) {
-        setDataFiles((prev) => (prev.length === 0 ? files : prev));
-      }
-    });
-  }, []);
-
-  // Auto-init runtime
-  const initStartedRef = useRef(false);
-  useEffect(() => {
-    if (autoInit && !initStartedRef.current) {
-      initStartedRef.current = true;
-      console.log("[RuntimeProvider] Initializing execution backend...");
-      execution.init();
-    }
-  }, [autoInit, execution]);
-
-  // Cleanup on unmount - use a ref to track pending disposal for StrictMode handling
-  const disposeTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  useEffect(() => {
-    if (disposeTimeoutRef.current) {
-      console.log("[RuntimeProvider] Cancelling pending disposal (StrictMode remount)");
-      clearTimeout(disposeTimeoutRef.current);
-      disposeTimeoutRef.current = null;
-    }
-    return () => {
-      disposeTimeoutRef.current = setTimeout(() => {
-        console.log("[RuntimeProvider] Disposing execution backend (delayed cleanup)");
-        execution.dispose();
-        disposeTimeoutRef.current = null;
-      }, 100);
-    };
-  }, [execution]);
-
-  // Refresh helpers
   const refreshTables = useCallback(async () => {
     const tableList = await execution.getTables();
     setTables(tableList);
@@ -263,49 +100,54 @@ export function RuntimeProvider({ execution, autoInit = true, children }: Runtim
   const refreshFiles = useCallback(async () => {
     const files = await execution.listFiles();
     setDataFiles(files);
-  }, [execution]);
+  }, [execution, setDataFiles]);
 
-  // Load data when runtime is ready
   useEffect(() => {
     if (!executionStatus.isDuckDBReady) return;
     execution.listFiles().then(setDataFiles);
     refreshTables();
     refreshFunctions();
     refreshVariables();
-  }, [executionStatus.isDuckDBReady, execution, refreshTables, refreshFunctions, refreshVariables]);
-
-  // ============================================================================
-  // File Operations
-  // ============================================================================
-
-  const broadcastFileChange = useCallback(() => {
-    fileChannelRef.current?.postMessage("changed");
-  }, []);
+  }, [executionStatus.isDuckDBReady, execution, setDataFiles, refreshTables, refreshFunctions, refreshVariables]);
 
   const handleWriteFile = useCallback(
     async (file: File, targetDir?: string): Promise<void> => {
-      const arrayBuffer = await file.arrayBuffer();
       const dir = targetDir ?? "/mnt/local";
-      await execution.writeFile(getRelativePath(`${dir}/${file.name}`), new Uint8Array(arrayBuffer));
-      const files = await execution.listFiles();
-      setDataFiles(files);
+      const fullPath = `${dir}/${file.name}`;
+      const data = new Uint8Array(await file.arrayBuffer());
+
+      if (executionStatus.isDuckDBReady) {
+        await execution.writeFile(toRelativePath(fullPath), data);
+        const files = await execution.listFiles();
+        setDataFiles(files);
+      } else {
+        await writeOPFSFile(toOPFSPath(fullPath), data);
+        const files = await listOPFSFiles();
+        setDataFiles(files);
+      }
+
       broadcastFileChange();
     },
-    [execution, broadcastFileChange],
+    [execution, executionStatus.isDuckDBReady, setDataFiles, broadcastFileChange],
   );
 
   const handleReadFile = useCallback(
     async (name: string): Promise<Uint8Array> => {
       const path = name.startsWith("/mnt/") ? name : `/mnt/local/${name}`;
-      return execution.readFile(getRelativePath(path));
+
+      if (executionStatus.isDuckDBReady) {
+        return execution.readFile(toRelativePath(path));
+      }
+
+      return readOPFSFile(toOPFSPath(path));
     },
-    [execution],
+    [execution, executionStatus.isDuckDBReady],
   );
 
   const handleDeleteFile = useCallback(
     async (name: string): Promise<boolean> => {
       const path = name.startsWith("/mnt/") ? name : `/mnt/local/${name}`;
-      const success = await execution.deleteFile(getRelativePath(path));
+      const success = await execution.deleteFile(toRelativePath(path));
       if (success) {
         const files = await execution.listFiles();
         setDataFiles(files);
@@ -313,7 +155,7 @@ export function RuntimeProvider({ execution, autoInit = true, children }: Runtim
       }
       return success;
     },
-    [execution, broadcastFileChange],
+    [execution, setDataFiles, broadcastFileChange],
   );
 
   const handleCreateDirectory = useCallback(
@@ -323,7 +165,7 @@ export function RuntimeProvider({ execution, autoInit = true, children }: Runtim
       setDataFiles(files);
       broadcastFileChange();
     },
-    [execution, broadcastFileChange],
+    [execution, setDataFiles, broadcastFileChange],
   );
 
   const handleDeleteDirectory = useCallback(
@@ -336,7 +178,7 @@ export function RuntimeProvider({ execution, autoInit = true, children }: Runtim
       }
       return success;
     },
-    [execution, broadcastFileChange],
+    [execution, setDataFiles, broadcastFileChange],
   );
 
   const handleRenameDirectory = useCallback(
@@ -346,7 +188,7 @@ export function RuntimeProvider({ execution, autoInit = true, children }: Runtim
       setDataFiles(files);
       broadcastFileChange();
     },
-    [execution, broadcastFileChange],
+    [execution, setDataFiles, broadcastFileChange],
   );
 
   const handleMoveFile = useCallback(
@@ -356,7 +198,7 @@ export function RuntimeProvider({ execution, autoInit = true, children }: Runtim
       setDataFiles(files);
       broadcastFileChange();
     },
-    [execution, broadcastFileChange],
+    [execution, setDataFiles, broadcastFileChange],
   );
 
   const handleRenameFile = useCallback(
@@ -366,12 +208,8 @@ export function RuntimeProvider({ execution, autoInit = true, children }: Runtim
       setDataFiles(files);
       broadcastFileChange();
     },
-    [execution, broadcastFileChange],
+    [execution, setDataFiles, broadcastFileChange],
   );
-
-  // ============================================================================
-  // Execution
-  // ============================================================================
 
   const handleRunSQL = useCallback(
     async (sql: string, viewName?: string) => execution.runSQL(sql, viewName),
@@ -380,6 +218,11 @@ export function RuntimeProvider({ execution, autoInit = true, children }: Runtim
 
   const handleRunPython = useCallback(
     async (code: string) => execution.runPython(code),
+    [execution],
+  );
+
+  const handleConvertFile = useCallback(
+    (filePath: string, targetFormat: string) => execution.convertFile(filePath, targetFormat),
     [execution],
   );
 
@@ -394,10 +237,6 @@ export function RuntimeProvider({ execution, autoInit = true, children }: Runtim
     await refreshTables();
   }, [execution, refreshTables]);
 
-  // ============================================================================
-  // Context Value
-  // ============================================================================
-
   const value = useMemo<RuntimeContextValue>(
     () => ({
       isReady: executionStatus.isDuckDBReady,
@@ -405,7 +244,6 @@ export function RuntimeProvider({ execution, autoInit = true, children }: Runtim
       error: executionStatus.error,
       s3Status: executionStatus.s3Status,
       dataFiles,
-      registeredFiles,
       tables,
       functions,
       variables,
@@ -419,6 +257,7 @@ export function RuntimeProvider({ execution, autoInit = true, children }: Runtim
       renameFile: handleRenameFile,
       runSQL: handleRunSQL,
       runPython: handleRunPython,
+      convertFile: handleConvertFile,
       refreshTables,
       refreshFunctions,
       refreshVariables,
@@ -427,10 +266,10 @@ export function RuntimeProvider({ execution, autoInit = true, children }: Runtim
     }),
     [
       executionStatus.isDuckDBReady, executionStatus.isLoading, executionStatus.error, executionStatus.s3Status,
-      dataFiles, registeredFiles, tables, functions, variables,
+      dataFiles, tables, functions, variables,
       handleWriteFile, handleReadFile, handleDeleteFile,
       handleCreateDirectory, handleDeleteDirectory, handleRenameDirectory,
-      handleMoveFile, handleRenameFile, handleRunSQL, handleRunPython,
+      handleMoveFile, handleRenameFile, handleRunSQL, handleRunPython, handleConvertFile,
       refreshTables, refreshFunctions, refreshVariables, refreshFiles, handleReset,
     ],
   );
@@ -455,7 +294,9 @@ export function RuntimeProvider({ execution, autoInit = true, children }: Runtim
 
   return (
     <ExecutionBackendContext.Provider value={execution}>
-      <RuntimeContext.Provider value={value}>{children}</RuntimeContext.Provider>
+      <RuntimeContext.Provider value={value}>
+        {children}
+      </RuntimeContext.Provider>
     </ExecutionBackendContext.Provider>
   );
 }

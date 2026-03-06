@@ -6,7 +6,8 @@ import type {
   IExecutionBackend,
 } from "./interface";
 
-const STORAGE_MOUNT_PATH = "/mnt";
+import { MOUNT_ROOT } from "../../../lib/paths";
+const STORAGE_MOUNT_PATH = MOUNT_ROOT;
 
 type PendingRequest = {
   resolve: (value: unknown) => void;
@@ -20,13 +21,6 @@ function generateRequestId(): string {
 
 const LOG_PREFIX = "[PyodideBackend]";
 
-/**
- * Pyodide-based execution backend.
- *
- * This class manages a web worker running Pyodide with DuckDB for
- * Python and SQL execution in the browser. Files are stored using
- * OPFS (Origin Private File System) for persistence and byte-range access.
- */
 export class PyodideExecutionBackend implements IExecutionBackend {
   private worker: Worker | null = null;
   private pendingRequests = new Map<string, PendingRequest>();
@@ -105,7 +99,6 @@ export class PyodideExecutionBackend implements IExecutionBackend {
         return;
       }
 
-      // S3 file list arrives asynchronously after S3 mount
       if (response.type === "s3-files") {
         console.log(LOG_PREFIX, `S3 files received: ${response.files.length} files`);
         this.emitChange({ type: "files", data: response.files });
@@ -171,6 +164,9 @@ export class PyodideExecutionBackend implements IExecutionBackend {
         case "deleteDirectory":
           pending.resolve(response.success);
           break;
+        case "convertFile":
+          pending.resolve(response.data);
+          break;
       }
     };
 
@@ -178,7 +174,6 @@ export class PyodideExecutionBackend implements IExecutionBackend {
       const errorMessage = error.message || "Worker crashed unexpectedly";
       this.updateStatus({ error: errorMessage, isLoading: false });
 
-      // Reject all pending requests so promises don't hang forever
       for (const [, pending] of this.pendingRequests) {
         pending.reject(new Error(errorMessage));
       }
@@ -278,8 +273,6 @@ export class PyodideExecutionBackend implements IExecutionBackend {
       id: generateRequestId(),
     });
   }
-
-  // ========== File System Operations (OPFS-backed) ==========
 
   async listFiles(): Promise<FileInfo[]> {
     if (!this.initPromise) return [];
@@ -424,7 +417,16 @@ export class PyodideExecutionBackend implements IExecutionBackend {
     this.emitFilesChange();
   }
 
-  // ========== Lifecycle ==========
+  async convertFile(filePath: string, targetFormat: string): Promise<Uint8Array> {
+    await this.init();
+    const buffer = await this.sendRequest<ArrayBuffer>({
+      type: "convertFile",
+      id: generateRequestId(),
+      filePath,
+      targetFormat,
+    });
+    return new Uint8Array(buffer);
+  }
 
   async reset(): Promise<void> {
     console.log(LOG_PREFIX, "Resetting runtime...");

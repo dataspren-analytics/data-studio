@@ -2,7 +2,7 @@ import { createStore } from "zustand";
 import { persist } from "zustand/middleware";
 import type { AppState } from "./types";
 
-const DEFAULT_EXPANDED_PATHS = ["/mnt", "/mnt/local"];
+import { DEFAULT_EXPANDED_PATHS } from "../lib/paths";
 const DEFAULT_SIDEBAR_WIDTH = 224;
 
 export function createAppStore() {

@@ -1,24 +1,10 @@
-/**
- * Notebook Utilities
- *
- * Pure functions for notebook file operations (list, read, write).
- * These replace the old FileSyncer wrapper — no state, no events, no class.
- */
-
 import type { NotebookCell, NotebookDocument } from "./core/nbformat";
 import { parseNotebook, serializeNotebook } from "./core/nbformat";
 import type { IRuntimeFileSystem } from "./backends/execution/interface";
 import type { FileInfo } from "./backends/execution/interface";
 
-const MOUNT_PATH = "/mnt";
+import { toRelativePath } from "../lib/paths";
 
-// ============================================================================
-// Pure String Helpers
-// ============================================================================
-
-/**
- * Generate a unique name by appending a counter suffix if needed.
- */
 export function getUniqueName(baseName: string, existingNames: string[]): string {
   const otherNames = new Set(existingNames);
   if (!otherNames.has(baseName)) return baseName;
@@ -32,9 +18,6 @@ export function getUniqueName(baseName: string, existingNames: string[]): string
   return candidate;
 }
 
-/**
- * Sanitize a string for use as a file name.
- */
 export function sanitizeFileName(name: string): string {
   return name
     .replace(/[<>:"/\\|?*]/g, "_")
@@ -42,13 +25,6 @@ export function sanitizeFileName(name: string): string {
     .trim() || "Untitled";
 }
 
-// ============================================================================
-// Notebook File Creation
-// ============================================================================
-
-/**
- * Create a new .ipynb file on disk and return its full file path.
- */
 export async function createNotebookFile(
   execution: IRuntimeFileSystem,
   options?: {
@@ -85,23 +61,6 @@ export interface NotebookInfo {
   updatedAt: number;
 }
 
-/**
- * Strip the /mnt prefix from a full path to get a relative path
- * suitable for IRuntimeFileSystem file methods.
- */
-export function getRelativePath(fullPath: string): string {
-  if (fullPath.startsWith(MOUNT_PATH + "/")) {
-    return fullPath.slice(MOUNT_PATH.length + 1);
-  }
-  if (fullPath.startsWith(MOUNT_PATH)) {
-    return fullPath.slice(MOUNT_PATH.length);
-  }
-  return fullPath.replace(/^\/+/, "");
-}
-
-/**
- * List all .ipynb notebooks from the execution backend.
- */
 export async function listNotebooks(
   execution: IRuntimeFileSystem,
 ): Promise<NotebookInfo[]> {
@@ -111,7 +70,7 @@ export async function listNotebooks(
   for (const file of files) {
     if (!file.isDirectory && file.path.endsWith(".ipynb")) {
       try {
-        const relativePath = getRelativePath(file.path);
+        const relativePath = toRelativePath(file.path);
         const data = await execution.readFile(relativePath);
         const content = new TextDecoder().decode(data);
         const doc = parseNotebook(content);
@@ -132,22 +91,16 @@ export async function listNotebooks(
   return notebooks;
 }
 
-/**
- * Read and parse a notebook document.
- */
 export async function readNotebook(
   execution: IRuntimeFileSystem,
   path: string,
 ): Promise<NotebookDocument> {
-  const relativePath = getRelativePath(path);
+  const relativePath = toRelativePath(path);
   const data = await execution.readFile(relativePath);
   const content = new TextDecoder().decode(data);
   return parseNotebook(content);
 }
 
-/**
- * Serialize and write a notebook document.
- */
 export async function writeNotebook(
   execution: IRuntimeFileSystem,
   path: string,
@@ -156,9 +109,8 @@ export async function writeNotebook(
 ): Promise<void> {
   const content = serializeNotebook(document);
   const data = new TextEncoder().encode(content);
-  const relativePath = getRelativePath(path);
+  const relativePath = toRelativePath(path);
   await execution.writeFile(relativePath, data, options);
 }
 
-// Re-export for convenience
 export type { FileInfo };

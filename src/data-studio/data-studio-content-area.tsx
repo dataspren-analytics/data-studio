@@ -1,16 +1,11 @@
 "use client";
 
 import { FileX, Loader2 } from "lucide-react";
-import { CsvFileViewer } from "./viewers/csv-file-viewer";
-import { ExcelFileViewer } from "./viewers/excel-file-viewer";
+import { getFileName } from "./lib/paths";
 import { IpynbFileViewer } from "./viewers/ipynb-file-viewer";
-import { JsonFileViewer } from "./viewers/json-file-viewer";
-import { ParquetFileViewer } from "./viewers/parquet-file-viewer";
-import { SqlFileViewer } from "./viewers/sql-file-viewer";
-import { TextFileViewer } from "./viewers/text-file-viewer";
 import { useRuntime } from "./provider/runtime-provider";
 import { useAppStore, selectActiveFilePath } from "./store";
-import { FileExtension } from "./viewers/types";
+import { getFileType } from "./lib/file-types";
 
 export function ContentArea() {
   const runtime = useRuntime();
@@ -20,32 +15,12 @@ export function ContentArea() {
     return <IpynbFileViewer filePath="" runtime={runtime} />;
   }
 
-  function getFileExtension(filePath: string): FileExtension | null {
-    if (filePath.endsWith(".csv")) return ".csv";
-    if (filePath.endsWith(".ipynb")) return ".ipynb";
-    if (filePath.endsWith(".json")) return ".json";
-    if (filePath.endsWith(".parquet")) return ".parquet";
-    if (filePath.endsWith(".xlsx")) return ".xlsx";
-    if (filePath.endsWith(".xls")) return ".xls";
-    if (filePath.endsWith(".md")) return ".md";
-    if (filePath.endsWith(".txt")) return ".txt";
-    if (filePath.endsWith(".sql")) return ".sql";
-  
-    const fileName = filePath.split("/").pop() || "";
-    if (!fileName.includes(".")) return "none";
-  
-    return null;
-  }
+  const fileType = getFileType(activeFilePath);
 
-
-
-  const extension = getFileExtension(activeFilePath);
-
-  // Check if file still exists (only after runtime has loaded files)
   if (runtime.isReady && runtime.dataFiles.length > 0) {
     const fileExists = runtime.dataFiles.some((f) => f.path === activeFilePath);
     if (!fileExists) {
-      const fileName = activeFilePath.split("/").pop() ?? activeFilePath;
+      const fileName = getFileName(activeFilePath, activeFilePath);
       return (
         <div className="flex-1 flex items-center justify-center bg-stone-50 dark:bg-background">
           <div className="flex flex-col items-center gap-3 max-w-sm text-center px-4">
@@ -60,9 +35,7 @@ export function ContentArea() {
     }
   }
 
-  // Show a loading state for data files when the runtime isn't ready yet
-  // CSV files read directly from OPFS and don't need the runtime
-  if (!runtime.isReady && extension !== ".ipynb" && extension !== ".csv") {
+  if (!runtime.isReady && !fileType.canRenderWithoutRuntime) {
     return (
       <div className="flex-1 flex items-center justify-center bg-stone-50 dark:bg-background">
         <div className="flex items-center gap-2 text-neutral-400">
@@ -73,25 +46,6 @@ export function ContentArea() {
     );
   }
 
-  switch (extension) {
-    case ".csv":
-      return <CsvFileViewer filePath={activeFilePath} runtime={runtime} />;
-    case ".json":
-      return <JsonFileViewer filePath={activeFilePath} runtime={runtime} />;
-    case ".parquet":
-      return <ParquetFileViewer filePath={activeFilePath} runtime={runtime} />;
-    case ".xlsx":
-    case ".xls":
-      return <ExcelFileViewer filePath={activeFilePath} runtime={runtime} />;
-    case ".sql":
-      return <SqlFileViewer filePath={activeFilePath} runtime={runtime} />;
-    case ".md":
-    case ".txt":
-    case "none":
-      return <TextFileViewer filePath={activeFilePath} runtime={runtime} />;
-    case ".ipynb":
-    case null:
-    default:
-      return <IpynbFileViewer filePath={activeFilePath} runtime={runtime} />;
-  }
+  const Viewer = fileType.viewer;
+  return <Viewer filePath={activeFilePath} runtime={runtime} />;
 }

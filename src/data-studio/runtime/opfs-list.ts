@@ -1,14 +1,5 @@
-/**
- * Main-thread OPFS utilities for early file listing and reading.
- *
- * These functions access the Origin Private File System directly from
- * the main thread without going through the Pyodide web worker, enabling
- * the UI to show the file tree and notebooks before the runtime is ready.
- */
-
 import type { FileInfo } from "./backends/execution/interface";
-
-const MOUNT_PREFIX = "/mnt/local";
+import { LOCAL_MOUNT } from "../lib/paths";
 
 async function listFilesRecursive(
   dir: FileSystemDirectoryHandle,
@@ -18,7 +9,7 @@ async function listFilesRecursive(
 
   for await (const [name, handle] of dir.entries()) {
     const relativePath = pathPrefix ? `${pathPrefix}/${name}` : name;
-    const fullPath = `${MOUNT_PREFIX}/${relativePath}`;
+    const fullPath = `${LOCAL_MOUNT}/${relativePath}`;
 
     if (handle.kind === "file") {
       try {
@@ -40,13 +31,10 @@ async function listFilesRecursive(
   return files;
 }
 
-/**
- * List all files in OPFS directly from the main thread.
- * Returns files with full /mnt/local/... paths matching the runtime convention.
- */
 export async function listOPFSFiles(): Promise<FileInfo[]> {
   try {
     const root = await navigator.storage.getDirectory();
+
     const localDir: FileInfo = {
       name: "local",
       path: "/mnt/local",
@@ -60,10 +48,6 @@ export async function listOPFSFiles(): Promise<FileInfo[]> {
   }
 }
 
-/**
- * Read a file from OPFS directly from the main thread.
- * @param opfsPath - Path relative to OPFS root (e.g., "My_Notebook.ipynb" or "subdir/file.csv")
- */
 export async function readOPFSFile(opfsPath: string): Promise<Uint8Array> {
   const parts = opfsPath.split("/").filter(Boolean);
   const root = await navigator.storage.getDirectory();
@@ -76,4 +60,20 @@ export async function readOPFSFile(opfsPath: string): Promise<Uint8Array> {
   const fileHandle = await dir.getFileHandle(parts[parts.length - 1]);
   const file = await fileHandle.getFile();
   return new Uint8Array(await file.arrayBuffer());
+}
+
+export async function writeOPFSFile(opfsPath: string, data: Uint8Array): Promise<void> {
+  const parts = opfsPath.split("/").filter(Boolean);
+  const root = await navigator.storage.getDirectory();
+
+  let dir: FileSystemDirectoryHandle = root;
+  for (let i = 0; i < parts.length - 1; i++) {
+    dir = await dir.getDirectoryHandle(parts[i], { create: true });
+  }
+
+  const fileHandle = await dir.getFileHandle(parts[parts.length - 1], { create: true });
+  const writable = await fileHandle.createWritable();
+  const buffer: ArrayBuffer = data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength) as ArrayBuffer;
+  await writable.write(buffer);
+  await writable.close();
 }

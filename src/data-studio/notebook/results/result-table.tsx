@@ -157,7 +157,7 @@ export function ResultTable({ tableData, totalRows, viewName, cellId, visibleRow
     () =>
       columnNames.map((col) => ({
         id: col,
-        accessorKey: col,
+        accessorFn: (row) => row[col],
         header: ({ column }) => (
           <div className="flex items-center gap-1 group/header">
             <span className="select-text cursor-text" onClick={(e) => e.stopPropagation()}>{col}</span>

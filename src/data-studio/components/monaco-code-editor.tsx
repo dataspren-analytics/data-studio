@@ -51,7 +51,7 @@ function registerThemes(monaco: Monaco) {
     ],
     colors: {
       "editor.background": "#00000000",
-      "editor.lineHighlightBackground": "#00000000",
+      "editor.lineHighlightBackground": "#ffffff0a",
     },
   });
 
@@ -75,7 +75,7 @@ function registerThemes(monaco: Monaco) {
     ],
     colors: {
       "editor.background": "#00000000",
-      "editor.lineHighlightBackground": "#00000000",
+      "editor.lineHighlightBackground": "#00000008",
     },
   });
 }
@@ -87,6 +87,7 @@ export interface MonacoCodeEditorProps {
   isDark?: boolean;
   enableScrolling?: boolean;
   showLineNumbers?: boolean;
+  highlightActiveLine?: boolean;
   minHeight?: number;
   resetKey?: string;
   autoFocus?: boolean;
@@ -109,6 +110,7 @@ export const MonacoCodeEditor = forwardRef<MonacoEditorHandle, MonacoCodeEditorP
       isDark = true,
       enableScrolling = false,
       showLineNumbers = false,
+      highlightActiveLine = false,
       minHeight = 80,
       resetKey,
       autoFocus = false,
@@ -218,7 +220,7 @@ export const MonacoCodeEditor = forwardRef<MonacoEditorHandle, MonacoCodeEditorP
       overviewRulerLanes: 0,
       hideCursorInOverviewRuler: true,
       overviewRulerBorder: false,
-      renderLineHighlight: "none" as const,
+      renderLineHighlight: highlightActiveLine ? ("line" as const) : ("none" as const),
       glyphMargin: false,
       folding: false,
     };

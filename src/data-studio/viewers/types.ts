@@ -5,11 +5,6 @@ export interface FileViewerProps {
   runtime: RuntimeContextValue;
 }
 
-export type FileViewerComponent = React.ComponentType<FileViewerProps>;
-
-export type FileExtension = ".csv" | ".ipynb" | ".json" | ".parquet" | ".xlsx" | ".xls" | ".md" | ".txt" | ".sql" | "none";
-
-/** Discriminated union for file loading state across all viewers */
 export type ViewerLoadingState<T = void> =
   | { status: "loading" }
   | { status: "success" } & (T extends void ? object : T)

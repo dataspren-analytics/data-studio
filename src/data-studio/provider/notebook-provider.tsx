@@ -13,7 +13,6 @@ import {
 import type { NotebookCell, NotebookDocument } from "../runtime";
 import { downloadNotebook, parseNotebook } from "../runtime";
 import {
-  getRelativePath,
   getUniqueName,
   sanitizeFileName,
   readNotebook as readNotebookUtil,
@@ -21,13 +20,9 @@ import {
 } from "../runtime/notebook-utils";
 import { listOPFSFiles, readOPFSFile } from "../runtime/opfs-list";
 import { initialCells } from "../notebook/constants";
+import { getFileName, toOPFSPath, getFileExtension, isNotebookFile, toRelativePath } from "../lib/paths";
 
-/**
- * Notebook entry as displayed in the sidebar.
- * This is what UI components see - no storage implementation details.
- */
 export interface NotebookEntry {
-  /** The file path (e.g., "/mnt/local/folder/notebook.ipynb") - this is the unique identifier */
   filePath: string;
   name: string;
   updated_at: number;
@@ -69,6 +64,8 @@ export interface NotebookContextValue {
 import { generateId } from "../notebook/utils";
 import { useRuntime, useExecutionBackend } from "./runtime-provider";
 import { useAppStore, useAppStoreApi, selectActiveFilePath } from "../store";
+import { useNotebookPersistence } from "./hooks/use-notebook-persistence";
+import { useCrossTabNotebookSync } from "./hooks/use-cross-tab-sync";
 
 
 // ============================================================================
@@ -130,43 +127,13 @@ export function NotebookProviderInternal({
 
   const [notebooks, setNotebooks] = useState<NotebookEntry[]>([]);
   const [isLoaded, setIsLoaded] = useState(false);
-  const pendingSaves = useRef<Map<string, NotebookEntry>>(new Map());
-  const deletedPaths = useRef<Set<string>>(new Set());
-  const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const isFlushingRef = useRef(false);
   const notebooksRef = useRef<NotebookEntry[]>(notebooks);
 
   useEffect(() => {
     notebooksRef.current = notebooks;
   }, [notebooks]);
 
-  const flushPendingSaves = useCallback(async () => {
-    if (ephemeral || pendingSaves.current.size === 0 || isFlushingRef.current) return;
-
-    isFlushingRef.current = true;
-    try {
-      const toSave = Array.from(pendingSaves.current.values()).filter(
-        (n) => !deletedPaths.current.has(n.filePath),
-      );
-      pendingSaves.current.clear();
-      await Promise.all(toSave.map((n) => writeNotebookUtil(execution, n.filePath, n.document, { silent: true })));
-    } finally {
-      isFlushingRef.current = false;
-      if (pendingSaves.current.size > 0) {
-        if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
-        saveTimeoutRef.current = setTimeout(() => flushPendingSaves(), 100);
-      }
-    }
-  }, [ephemeral, execution]);
-
-  const scheduleSave = useCallback(
-    (entry: NotebookEntry) => {
-      pendingSaves.current.set(entry.filePath, entry);
-      if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
-      saveTimeoutRef.current = setTimeout(() => flushPendingSaves(), 500);
-    },
-    [flushPendingSaves],
-  );
+  const { scheduleSave, markDeleted } = useNotebookPersistence(execution, ephemeral);
 
   // Early notebook loading: read .ipynb files directly from OPFS on the
   // main thread so notebooks are visible before the runtime is ready.
@@ -191,7 +158,7 @@ export function NotebookProviderInternal({
         for (const file of notebookFiles) {
           try {
             // Convert /mnt/local/path.ipynb to OPFS-relative path
-            const opfsPath = file.path.replace(/^\/mnt\/local\//, "");
+            const opfsPath = toOPFSPath(file.path);
             const data = await readOPFSFile(opfsPath);
             const content = new TextDecoder().decode(data);
             const doc = parseNotebook(content);
@@ -236,25 +203,15 @@ export function NotebookProviderInternal({
     setIsLoaded(true);
   }, [ephemeral, configInitialCells, appStoreApi]);
 
-  // Flush pending saves on unmount instead of just cancelling
-  useEffect(() => {
-    return () => {
-      if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
-      if (pendingSaves.current.size > 0) {
-        flushPendingSaves();
-      }
-    };
-  }, [flushPendingSaves]);
-
   // Reactive loading: when activeFilePath changes to a .ipynb not already loaded, load it
   useEffect(() => {
-    if (!activeFilePath?.endsWith(".ipynb")) return;
+    if (!activeFilePath || !isNotebookFile(activeFilePath)) return;
     if (notebooksRef.current.some((n) => n.filePath === activeFilePath)) return;
 
     (async () => {
       try {
         const doc = await readNotebookUtil(execution, activeFilePath);
-        const filename = activeFilePath.split("/").pop() ?? "Untitled";
+        const filename = getFileName(activeFilePath, "Untitled");
         const name = filename.replace(/\.ipynb$/, "").replace(/_/g, " ");
         const now = Date.now();
 
@@ -277,32 +234,15 @@ export function NotebookProviderInternal({
         };
 
         setNotebooks((prev) => [...prev, entry]);
-      } catch (e) {
-        console.error("[NotebookProvider] Failed to load notebook reactively:", activeFilePath, e);
+      } catch {
+        // File doesn't exist (e.g. OPFS was evicted) — fall back to home
+        appStoreApi.getState().selectFile(null);
+        appStoreApi.getState().setShowHome(true);
       }
     })();
-  }, [activeFilePath, execution]);
+  }, [activeFilePath, execution, appStoreApi]);
 
-  // Remove notebooks whose .ipynb files no longer exist in the runtime file list.
-  // This handles cross-tab deletion: when another tab deletes a notebook file,
-  // the BroadcastChannel triggers a dataFiles refresh, and this effect cleans up.
-  const prevDataFilesRef = useRef(runtime.dataFiles);
-  useEffect(() => {
-    if (!isLoaded || runtime.dataFiles.length === 0) return;
-    // Only react when dataFiles actually shrinks (files were removed)
-    if (runtime.dataFiles.length >= prevDataFilesRef.current.length) {
-      prevDataFilesRef.current = runtime.dataFiles;
-      return;
-    }
-    prevDataFilesRef.current = runtime.dataFiles;
-
-    const existingPaths = new Set(runtime.dataFiles.map((f) => f.path));
-    setNotebooks((prev) => {
-      const filtered = prev.filter((n) => existingPaths.has(n.filePath));
-      if (filtered.length === prev.length) return prev;
-      return filtered;
-    });
-  }, [runtime.dataFiles, isLoaded]);
+  useCrossTabNotebookSync(runtime.dataFiles, isLoaded, setNotebooks);
 
   const activeNotebook = notebooks.find((n) => n.filePath === activeFilePath) ?? null;
 
@@ -322,11 +262,11 @@ export function NotebookProviderInternal({
       let filesAdded = 0;
       if (filesToInclude && filesToInclude.length > 0 && !ephemeral) {
         for (const file of filesToInclude) {
-          const extension = file.name.split(".").pop()?.toLowerCase();
+          const extension = getFileExtension(file.name);
           if (!extension || !["csv", "parquet", "json"].includes(extension)) continue;
 
           const arrayBuffer = await file.arrayBuffer();
-          await execution.writeFile(getRelativePath(`/mnt/local/${file.name}`), new Uint8Array(arrayBuffer));
+          await execution.writeFile(toRelativePath(`/mnt/local/${file.name}`), new Uint8Array(arrayBuffer));
           filesAdded++;
         }
 
@@ -348,16 +288,15 @@ export function NotebookProviderInternal({
 
   const handleDeleteNotebook = useCallback(
     async (filePath: string) => {
-      deletedPaths.current.add(filePath);
+      markDeleted(filePath);
       if (appStoreApi.getState().activeFilePath === filePath) {
         appStoreApi.getState().selectFile(null);
       }
-      pendingSaves.current.delete(filePath);
 
       const notebook = notebooksRef.current.find((n) => n.filePath === filePath);
 
       if (!ephemeral && notebook) {
-        await execution.deleteFile(getRelativePath(notebook.filePath));
+        await execution.deleteFile(toRelativePath(notebook.filePath));
       }
 
       const remaining = notebooksRef.current.filter((n) => n.filePath !== filePath);
@@ -366,7 +305,7 @@ export function NotebookProviderInternal({
         appStoreApi.getState().selectFile(null);
       }
     },
-    [ephemeral, execution, appStoreApi],
+    [ephemeral, execution, appStoreApi, markDeleted],
   );
 
   const handleRenameNotebook = useCallback(
@@ -400,7 +339,7 @@ export function NotebookProviderInternal({
               },
             };
             if (!ephemeral && newFilePath !== filePath) {
-              execution.deleteFile(getRelativePath(filePath));
+              execution.deleteFile(toRelativePath(filePath));
             }
             scheduleSave(updated);
             return updated;

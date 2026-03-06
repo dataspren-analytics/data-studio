@@ -10,8 +10,6 @@ import type {
 import type { IVirtualFSDevice } from "./virtual-fs-device";
 import { INIT_PYTHON_CODE } from "./init-python";
 import { createOPFSDevice } from "./opfs-device";
-import { createS3Device, type S3Config } from "./s3-device";
-import { S3SyncBridge, isSharedArrayBufferAvailable } from "./s3-sync-bridge";
 import { createVirtualFSDevice } from "./virtual-fs-device";
 
 type EmscriptenFS = {
@@ -64,11 +62,11 @@ let pyodideLoadingPromise: Promise<PyodideInstance> | null = null;
 let duckdbInitPromise: Promise<void> | null = null;
 let isDuckDBReady = false;
 
-// Storage device state
+import { MOUNT_ROOT, toRelativePath } from "../../lib/paths";
+
 let virtualFS: IVirtualFSDevice | null = null;
-const STORAGE_MOUNT_PATH = "/mnt";
+const STORAGE_MOUNT_PATH = MOUNT_ROOT;
 const LOCAL_STORAGE_SUBPATH = "local";
-const S3_PUBLIC_BUCKET_SUBPATH = "public_bucket";
 
 // Idle handle suspension: close OPFS sync handles after inactivity so other
 // tabs can access the same OPFS files without NoModificationAllowedError.
@@ -211,14 +209,6 @@ await micropip.install('matplotlib')
   return duckdbInitPromise;
 }
 
-// ============================================================================
-// Storage Functions - All operations go through VirtualFS
-// ============================================================================
-
-/**
- * Initialize local storage (OPFS) only. Returns immediately.
- * S3 is mounted separately in the background via initS3Storage().
- */
 async function initLocalStorage(): Promise<IVirtualFSDevice> {
   if (virtualFS) return virtualFS;
 
@@ -226,16 +216,12 @@ async function initLocalStorage(): Promise<IVirtualFSDevice> {
 
   console.log(LOG_PREFIX, "Initializing virtual filesystem...");
 
-  // Create the virtual filesystem (handles Emscripten integration)
   virtualFS = createVirtualFSDevice(pyodide.FS as Parameters<typeof createVirtualFSDevice>[0]);
   await virtualFS.init(STORAGE_MOUNT_PATH);
 
-  // Create and initialize OPFS device (pure storage, no Emscripten knowledge)
   const opfsDevice = createOPFSDevice();
   await opfsDevice.init();
 
-  // Mount OPFS as the local storage backend
-  // VFS will scan the device and register all existing files in Emscripten
   console.log(LOG_PREFIX, `About to mount OPFS device at ${LOCAL_STORAGE_SUBPATH}...`);
   await virtualFS.mountDevice(LOCAL_STORAGE_SUBPATH, opfsDevice);
   console.log(LOG_PREFIX, `OPFS device mounted successfully`);
@@ -246,122 +232,22 @@ async function initLocalStorage(): Promise<IVirtualFSDevice> {
   return virtualFS;
 }
 
-/**
- * Mount S3 storage in the background. Does not block init.
- * Posts status events and file list when done.
- *
- * If SharedArrayBuffer is available (cross-origin isolation enabled),
- * creates an S3SyncBridge for true byte-range reads. Otherwise, falls
- * back to lazy on-demand loading (full file download into MEMFS).
- */
-async function initS3Storage(): Promise<void> {
-  if (!virtualFS) {
-    console.warn(LOG_PREFIX, "Cannot mount S3: VFS not initialized");
-    return;
-  }
-
-  const s3Config: S3Config = {
-    accessKeyId: process.env.NEXT_PUBLIC_S3_ACCESS_KEY_ID || "",
-    secretAccessKey: process.env.NEXT_PUBLIC_S3_SECRET_ACCESS_KEY || "",
-    endpoint: process.env.NEXT_PUBLIC_S3_ENDPOINT || "",
-    region: process.env.NEXT_PUBLIC_S3_REGION || "",
-    bucket: process.env.NEXT_PUBLIC_S3_BUCKET || "",
-  };
-
-  // Skip if S3 config is incomplete
-  if (!s3Config.accessKeyId || !s3Config.endpoint || !s3Config.bucket) {
-    console.log(LOG_PREFIX, "S3 config incomplete, skipping S3 mount");
-    return;
-  }
-
-  postResponse({ type: "status", status: "s3-mounting" });
-
-  try {
-    // Try to create sync bridge for byte-range reads (requires SharedArrayBuffer)
-    let syncBridge: S3SyncBridge | undefined;
-    if (isSharedArrayBufferAvailable()) {
-      console.log(LOG_PREFIX, "SharedArrayBuffer available — creating S3 sync bridge for byte-range reads");
-      try {
-        syncBridge = new S3SyncBridge(s3Config);
-        await syncBridge.init();
-        console.log(LOG_PREFIX, "S3 sync bridge ready");
-      } catch (err) {
-        console.warn(LOG_PREFIX, "Failed to create S3 sync bridge, falling back to lazy loading:", err);
-        syncBridge = undefined;
-      }
-    } else {
-      console.log(LOG_PREFIX, "SharedArrayBuffer not available — S3 files will use lazy on-demand loading");
-    }
-
-    console.log(LOG_PREFIX, `Mounting S3 device...`);
-    const s3Device = createS3Device(s3Config, syncBridge);
-    await s3Device.init();
-    await virtualFS.mountDevice(S3_PUBLIC_BUCKET_SUBPATH, s3Device);
-    console.log(LOG_PREFIX, `S3 device mounted at ${STORAGE_MOUNT_PATH}/${S3_PUBLIC_BUCKET_SUBPATH}`);
-
-    // Send the full file list (local + S3) to the UI
-    const allFiles = await virtualFS.listAllFiles();
-    const filesWithFullPaths = allFiles.map(f => ({
-      ...f,
-      path: `${STORAGE_MOUNT_PATH}/${f.path}`,
-    }));
-    postResponse({ type: "s3-files", files: filesWithFullPaths });
-    postResponse({ type: "status", status: "s3-ready" });
-  } catch (err) {
-    console.warn(LOG_PREFIX, `S3 device not available, skipping:`, err);
-    // Clean up broken mount
-    try { virtualFS!.unmountDevice(S3_PUBLIC_BUCKET_SUBPATH); } catch { /* not mounted */ }
-    postResponse({ type: "status", status: "s3-error" });
-  }
-}
-
 function getVFS(): IVirtualFSDevice {
   if (!virtualFS) throw new Error("Virtual filesystem not initialized. Call initStorage() first.");
   return virtualFS;
 }
 
-/**
- * Normalize a path for VFS.
- * 
- * The working directory is /mnt, so paths are relative to that.
- * Examples:
- * - "local/data.csv" → "local/data.csv" (for OPFS)
- * - "s3-bucket/data.parquet" → "s3-bucket/data.parquet" (for future S3)
- * - "/mnt/local/data.csv" → "local/data.csv" (strips absolute prefix)
- */
-function toVFSPath(path: string): string {
-  let normalized = path;
+const toVFSPath = toRelativePath;
 
-  // Remove /mnt/ prefix if present (convert absolute to relative)
-  if (normalized.startsWith(`${STORAGE_MOUNT_PATH}/`)) {
-    normalized = normalized.slice(STORAGE_MOUNT_PATH.length + 1);
-  }
-
-  // Remove leading slashes
-  normalized = normalized.replace(/^\/+/, "");
-
-  return normalized;
-}
-
-// ============================================================================
-// Lazy File Pre-fetching
-// ============================================================================
-
-/**
- * Scan code for file path references and pre-fetch any lazy (not-yet-downloaded)
- * files before execution. This ensures DuckDB and Python can access S3 files
- * that haven't been downloaded yet.
- */
+/** Pre-fetch any lazy (not-yet-downloaded) S3 files referenced in the code. */
 async function ensureReferencedFilesReady(code: string): Promise<void> {
   if (!virtualFS) return;
 
   const lazyPaths = virtualFS.getLazyFilePaths();
   if (lazyPaths.length === 0) return;
 
-  // Find which lazy files are referenced in the code
   const toFetch: string[] = [];
   for (const fullPath of lazyPaths) {
-    // Check if the full path appears in the code (e.g., "/mnt/public_bucket/file.parquet")
     if (code.includes(fullPath)) {
       toFetch.push(fullPath);
     }
@@ -371,8 +257,7 @@ async function ensureReferencedFilesReady(code: string): Promise<void> {
 
   console.log(LOG_PREFIX, `Pre-fetching ${toFetch.length} lazy file(s) referenced in code...`);
   for (const fullPath of toFetch) {
-    // Convert full Emscripten path to VFS-relative path
-    const vfsPath = fullPath.slice(STORAGE_MOUNT_PATH.length + 1); // Remove "/mnt/" prefix
+    const vfsPath = fullPath.slice(STORAGE_MOUNT_PATH.length + 1);
     try {
       await virtualFS.ensureFileReady(vfsPath);
     } catch (e) {
@@ -382,10 +267,6 @@ async function ensureReferencedFilesReady(code: string): Promise<void> {
   console.log(LOG_PREFIX, `Pre-fetch complete`);
 }
 
-// ============================================================================
-// Execution Functions
-// ============================================================================
-
 async function runPython(code: string): Promise<PyodideExecutionResult> {
   const outputLines: string[] = [];
   const errorLines: string[] = [];
@@ -393,10 +274,7 @@ async function runPython(code: string): Promise<PyodideExecutionResult> {
   try {
     await initDuckDB();
 
-    // Resume OPFS handles (may have been suspended for multi-tab access)
     await resumeHandlesIfNeeded();
-
-    // Pre-fetch any lazy S3 files referenced in the code
     await ensureReferencedFilesReady(code);
 
     const instance = pyodide!;
@@ -526,39 +404,10 @@ async function runSQL(sql: string, viewName?: string): Promise<PyodideExecutionR
   try {
     await initDuckDB();
 
-    // Resume OPFS handles (may have been suspended for multi-tab access)
     await resumeHandlesIfNeeded();
-
-    // Pre-fetch any lazy S3 files referenced in the SQL
     await ensureReferencedFilesReady(sql);
 
     const instance = pyodide!;
-    
-    // Debug: Check if the file exists in Emscripten FS
-    const pathMatch = sql.match(/read_parquet\s*\(\s*['"]([^'"]+)['"]\s*\)/i) || 
-                      sql.match(/read_csv\s*\(\s*['"]([^'"]+)['"]\s*\)/i);
-    if (pathMatch) {
-      const filePath = pathMatch[1];
-      console.log(LOG_PREFIX, `Checking file: ${filePath}`);
-      try {
-        const stat = instance.FS.stat(filePath);
-        console.log(LOG_PREFIX, `File stat: size=${stat.size}, mode=${stat.mode.toString(8)}`);
-        
-        // Try to read first few bytes
-        try {
-          const fd = instance.FS.open(filePath, 'r');
-          console.log(LOG_PREFIX, `File opened with fd=${fd}`);
-          const buffer = new Uint8Array(100);
-          const bytesRead = instance.FS.read(fd, buffer, 0, 100, 0);
-          console.log(LOG_PREFIX, `Read ${bytesRead} bytes from file`);
-          instance.FS.close(fd);
-        } catch (readErr) {
-          console.error(LOG_PREFIX, `Failed to read file:`, readErr);
-        }
-      } catch (statErr) {
-        console.error(LOG_PREFIX, `File not found or stat failed:`, statErr);
-      }
-    }
 
     instance.setStdout({
       batched: (msg: string) => outputLines.push(msg),
@@ -754,10 +603,6 @@ json.dumps(_get_variables())
   }
 }
 
-// ============================================================================
-// Message Handler
-// ============================================================================
-
 self.onmessage = async (event: MessageEvent<WorkerRequest>) => {
   const request = event.data;
 
@@ -772,10 +617,6 @@ self.onmessage = async (event: MessageEvent<WorkerRequest>) => {
           pyodide!.FS.chdir(`${STORAGE_MOUNT_PATH}/${LOCAL_STORAGE_SUBPATH}`);
           postResponse({ type: "init", id: request.id, success: true });
           scheduleHandleSuspend();
-          // TODO: S3 mounting temporarily disabled — not stable yet
-          // initS3Storage().catch(err => {
-          //   console.warn(LOG_PREFIX, "Background S3 mount failed:", err);
-          // });
         } catch (err) {
           postResponse({
             type: "init",
@@ -829,12 +670,9 @@ self.onmessage = async (event: MessageEvent<WorkerRequest>) => {
         break;
       }
 
-      // ========== File Operations - All delegated to VirtualFS ==========
-
       case "listFiles": {
         const vfs = getVFS();
         const files = await vfs.listAllFiles();
-        // Prefix paths with mount path for the UI (e.g., "local/file.csv" -> "/mnt/local/file.csv")
         const filesWithFullPaths = files.map(f => ({
           ...f,
           path: `${STORAGE_MOUNT_PATH}/${f.path}`,
@@ -848,7 +686,6 @@ self.onmessage = async (event: MessageEvent<WorkerRequest>) => {
           const vfs = getVFS();
           const vfsPath = toVFSPath(request.name);
           await vfs.writeFile(vfsPath, request.data);
-          // Return the full path for the caller
           const fullPath = `${STORAGE_MOUNT_PATH}/${vfsPath}`;
           postResponse({ type: "writeFile", id: request.id, success: true, path: fullPath });
           scheduleHandleSuspend();
@@ -970,6 +807,103 @@ self.onmessage = async (event: MessageEvent<WorkerRequest>) => {
             success: false,
             error: err instanceof Error ? err.message : String(err),
           });
+        }
+        break;
+      }
+
+      case "convertFile": {
+        activeExecutions++;
+        try {
+          await initDuckDB();
+          await resumeHandlesIfNeeded();
+
+          const instance = pyodide!;
+          const filePath = request.filePath;
+          const targetFormat = request.targetFormat;
+
+          const ext = filePath.split(".").pop()?.toLowerCase() ?? "";
+          let readExpr: string;
+          switch (ext) {
+            case "csv":     readExpr = `read_csv('${filePath}')`; break;
+            case "parquet": readExpr = `read_parquet('${filePath}')`; break;
+            case "xlsx":
+            case "xls":     readExpr = `st_read('${filePath}')`; break;
+            default:
+              throw new Error(`Unsupported source file type: .${ext}`);
+          }
+
+          let data: Uint8Array;
+
+          if (targetFormat === "xlsx") {
+            const jsonResult = await instance.runPythonAsync(`
+import json
+_rows = _duckdb_conn.execute("SELECT * FROM ${readExpr}").fetchdf().to_dict(orient='records')
+json.dumps(_rows, default=str)
+`);
+            const jsonStr = String(jsonResult);
+            instance.FS.writeFile("/tmp/_export_data.json", jsonStr);
+            await instance.runPythonAsync(`
+import json
+from openpyxl import Workbook
+
+with open('/tmp/_export_data.json', 'r') as f:
+    _data = json.load(f)
+
+_wb = Workbook()
+_ws = _wb.active
+if _data:
+    _ws.append(list(_data[0].keys()))
+    for _row in _data:
+        _ws.append(list(_row.values()))
+_wb.save('/tmp/_export.xlsx')
+`);
+            data = instance.FS.readFile("/tmp/_export.xlsx") as Uint8Array;
+            try { instance.FS.unlink("/tmp/_export_data.json"); } catch { /* ok */ }
+            try { instance.FS.unlink("/tmp/_export.xlsx"); } catch { /* ok */ }
+          } else {
+            let copyOpts: string;
+            let tmpFile: string;
+            switch (targetFormat) {
+              case "csv":
+                copyOpts = "FORMAT CSV, HEADER";
+                tmpFile = "/tmp/_export.csv";
+                break;
+              case "json":
+                copyOpts = "FORMAT JSON, ARRAY true";
+                tmpFile = "/tmp/_export.json";
+                break;
+              case "parquet":
+                copyOpts = "FORMAT PARQUET";
+                tmpFile = "/tmp/_export.parquet";
+                break;
+              default:
+                throw new Error(`Unsupported target format: ${targetFormat}`);
+            }
+
+            await instance.runPythonAsync(
+              `_duckdb_conn.execute("COPY (SELECT * FROM ${readExpr}) TO '${tmpFile}' (${copyOpts})")`
+            );
+            data = instance.FS.readFile(tmpFile) as Uint8Array;
+            try { instance.FS.unlink(tmpFile); } catch { /* ok */ }
+          }
+
+          const buffer = data.buffer.slice(
+            data.byteOffset,
+            data.byteOffset + data.byteLength,
+          ) as ArrayBuffer;
+
+          postResponse(
+            { type: "convertFile", id: request.id, data: buffer } as WorkerResponse,
+          );
+        } catch (err) {
+          postResponse({
+            type: "error",
+            id: request.id,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        } finally {
+          activeExecutions--;
+          scheduleHandleSuspend();
         }
         break;
       }

@@ -21,14 +21,6 @@ export interface TableInfo {
   columns: TableColumn[];
 }
 
-export interface RegisteredFile {
-  name: string;
-  path: string;
-  size: number;
-  type: "csv" | "parquet" | "json";
-  columns?: TableColumn[];
-}
-
 export interface RegisteredFunction {
   name: string;
   parameters: { name: string; type: string }[];
